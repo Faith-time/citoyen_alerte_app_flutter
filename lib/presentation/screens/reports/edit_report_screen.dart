@@ -938,7 +938,7 @@ class _PhotoSection extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.all(3),
                         decoration: const BoxDecoration(
-                            color: Colors.red, shape: BoxShape.circle),
+                            color: AppTheme.error, shape: BoxShape.circle),
                         child: const Icon(Icons.close,
                             color: Colors.white, size: 12),
                       ),

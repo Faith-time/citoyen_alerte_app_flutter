@@ -6,6 +6,7 @@ import 'package:citoyen_alerte_app_backup/core/services/dashboard_service.dart';
 import 'package:citoyen_alerte_app_backup/core/services/auth_service.dart';
 import 'package:citoyen_alerte_app_backup/core/services/api_service.dart';
 import 'package:citoyen_alerte_app_backup/core/theme/app_theme.dart';
+import 'package:citoyen_alerte_app_backup/core/theme/neo_kit.dart';
 import 'package:citoyen_alerte_app_backup/data/models/dashboard_model.dart';
 import 'package:citoyen_alerte_app_backup/routes/app_pages.dart';
 
@@ -28,6 +29,7 @@ int? _asInt(dynamic v) => v is num ? v.toInt() : null;
 
 String _categoryName(dynamic cat, [String fallback = 'Autre']) {
   if (cat is Map) return _str(cat['name'], fallback);
+  if (cat is String && cat.isNotEmpty) return cat;
   return fallback;
 }
 
@@ -37,6 +39,60 @@ String _firstPhoto(dynamic report, List<String> keys) {
     if (v is String && v.isNotEmpty) return v;
   }
   return '';
+}
+
+String _reportCategory(Map<String, dynamic> r, [String fallback = 'Autre']) {
+  final fromCat = _categoryName(r['category'], '');
+  if (fromCat.isNotEmpty) return fromCat;
+  return _str(r['category_name'], fallback);
+}
+
+DateTime? _parseDate(dynamic raw) {
+  if (raw == null) return null;
+  final s = raw.toString().trim();
+  if (s.isEmpty) return null;
+  return DateTime.tryParse(s)?.toLocal();
+}
+
+DateTime? _reportDate(Map<String, dynamic> r) =>
+    _parseDate(r['created_at']) ??
+        _parseDate(r['reported_at']) ??
+        _parseDate(r['updated_at']);
+
+String _normSeverity(dynamic v) {
+  final s = _str(v).toLowerCase();
+  if (const ['high', 'critical', 'urgent', 'élevé', 'eleve'].contains(s)) return 'high';
+  if (const ['medium', 'moderate', 'moyen'].contains(s)) return 'medium';
+  return 'low';
+}
+
+String _normStatus(dynamic v) {
+  final s = _str(v).toLowerCase();
+  switch (s) {
+    case 'pending':
+    case 'acknowledged':
+      return 'pending';
+    case 'routed':
+      return 'routed';
+    case 'in_progress':
+    case 'in-progress':
+    case 'assigned':
+      return 'in_progress';
+    case 'resolved':
+    case 'closed':
+      return 'resolved';
+    default:
+      return s;
+  }
+}
+
+/// Extrait une liste d'une réponse API (liste, {data: [...]}, paginator imbriqué).
+List _extractList(dynamic raw) {
+  if (raw is List) return raw;
+  if (raw is Map) {
+    return _extractList(raw['data'] ?? raw['items'] ?? raw['reports']);
+  }
+  return const [];
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -82,8 +138,7 @@ class AdminNewsEntry {
     return AdminNewsEntry(
       title: _str(r['title'], 'Signalement'),
       communeName: commune,
-      category: _categoryName(r['category']),
-      zone: _str(r['region'], commune.isNotEmpty ? commune : 'Autres zones'),
+      category: _reportCategory(r),      zone: _str(r['region'], commune.isNotEmpty ? commune : 'Autres zones'),
       authority: authName.isEmpty ? 'Autorité' : authName,
       beforePhotoUrl:
       _firstPhoto(r, ['before_photo_url', 'photo_url', 'image_url']),
@@ -95,7 +150,7 @@ class AdminNewsEntry {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-//  CONTROLLER
+//  CONTROLLER — logique inchangée
 // ════════════════════════════════════════════════════════════════════════════
 
 class AdminDashboardController extends GetxController {
@@ -117,13 +172,13 @@ class AdminDashboardController extends GetxController {
     'year': 'Cette année',
   };
 
-  // ── Filtre local pour les graphiques ──────────────────────────────────────
-  final chartPeriod = 'week'.obs;
+  final chartPeriod = 'all'.obs; // "Tout" par défaut : plus de graphiques vides
   static const Map<String, String> chartPeriods = {
     'day': '24h',
     'week': '7j',
     'month': '30j',
     'year': '1an',
+    'all': 'Tout',
   };
 
   final selectedCategory = ''.obs; // '' = toutes
@@ -189,43 +244,57 @@ class AdminDashboardController extends GetxController {
     if (f == 'all') return reports.toList();
     return reports.where((r) => r['status'] == f).toList();
   }
+  DateTime? get _chartStart {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    switch (chartPeriod.value) {
+      case 'day':
+        return DateTime(now.year, now.month, now.day, now.hour)
+            .subtract(const Duration(hours: 23));
+      case 'week':
+        return today.subtract(const Duration(days: 6));
+      case 'month':
+        return today.subtract(const Duration(days: 29));
+      case 'year':
+        return DateTime(now.year, now.month - 11, 1);
+      default:
+        return null;
+    }
+  }
 
   List<Map<String, dynamic>> get chartReports {
-    final now = DateTime.now();
-    final period = chartPeriod.value;
+    final start = _chartStart;
     final cat = selectedCategory.value;
     return reports.where((r) {
-      final raw = r['created_at'];
-      if (raw == null) return false;
-      final dt = DateTime.tryParse(raw.toString());
-      if (dt == null) return false;
-      final diff = now.difference(dt);
-      final inPeriod = switch (period) {
-        'day' => diff.inHours < 24,
-        'week' => diff.inDays < 7,
-        'month' => diff.inDays < 30,
-        'year' => diff.inDays < 365,
-        _ => true,
-      };
-      if (!inPeriod) return false;
+      if (start != null) {
+        final dt = _reportDate(r);
+        if (dt == null || dt.isBefore(start)) return false;
+      }
       if (cat.isEmpty) return true;
-      return _categoryName(r['category'], '') == cat;
+      return _reportCategory(r, '') == cat;
     }).toList();
   }
 
-  int countByStatus(String status) {
-    if (status == 'pending') {
-      return reports
-          .where((r) => r['status'] == 'pending' || r['status'] == 'acknowledged')
-          .length;
-    }
-    return reports.where((r) => r['status'] == status).length;
+  /// 5 derniers signalements (les plus récents d'abord).
+  List<Map<String, dynamic>> get recentReports {
+    final list = chartReports;
+    list.sort((a, b) {
+      final da = _reportDate(a) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final db = _reportDate(b) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return db.compareTo(da);
+    });
+    return list.take(5).toList();
   }
+
+  /// L'API admin renvoie des totaux "tout l'historique" : on ne les utilise
+  /// que si aucun filtre n'est actif, sinon on calcule en local.
+  bool get useApiStats =>
+      chartPeriod.value == 'all' && selectedCategory.value.isEmpty;
 
   Map<String, int> get categoryBreakdown {
     final map = <String, int>{};
     for (final r in chartReports) {
-      final name = _categoryName(r['category']);
+      final name = _reportCategory(r);
       map[name] = (map[name] ?? 0) + 1;
     }
     return map;
@@ -234,8 +303,8 @@ class AdminDashboardController extends GetxController {
   Map<String, int> get severityBreakdown {
     final map = <String, int>{'low': 0, 'medium': 0, 'high': 0};
     for (final r in chartReports) {
-      final s = _str(r['severity'], 'low');
-      if (map.containsKey(s)) map[s] = map[s]! + 1;
+      final s = _normSeverity(r['severity']);
+      map[s] = (map[s] ?? 0) + 1;
     }
     return map;
   }
@@ -248,8 +317,7 @@ class AdminDashboardController extends GetxController {
       'resolved': 0,
     };
     for (final r in chartReports) {
-      final s = _str(r['status']);
-      final key = (s == 'acknowledged') ? 'pending' : s;
+      final key = _normStatus(r['status']);
       if (map.containsKey(key)) map[key] = map[key]! + 1;
     }
     return map;
@@ -257,53 +325,99 @@ class AdminDashboardController extends GetxController {
 
   List<AdminTrendPoint> get trendData {
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
     final period = chartPeriod.value;
-    final int days = switch (period) {
-      'day' => 1,
-      'week' => 7,
-      'month' => 30,
-      _ => 52,
-    };
+    final list = chartReports;
 
-    if (period == 'year') {
-      final weeks = List<int>.filled(52, 0);
-      for (final r in chartReports) {
-        final dt = DateTime.tryParse(_str(r['created_at']));
+    // ── 24h : 24 points horaires ──────────────────────────────────────────
+    if (period == 'day') {
+      final start = _chartStart!;
+      final counts = List<int>.filled(24, 0);
+      for (final r in list) {
+        final dt = _reportDate(r);
         if (dt == null) continue;
-        final diff =
-            today.difference(DateTime(dt.year, dt.month, dt.day)).inDays;
-        final weekIdx = (diff / 7).floor();
-        if (weekIdx >= 0 && weekIdx < 52) weeks[51 - weekIdx]++;
+        final idx = dt.difference(start).inHours;
+        if (idx >= 0 && idx < 24) counts[idx]++;
       }
       return List.generate(
-          52, (i) => AdminTrendPoint(label: 'S${i + 1}', count: weeks[i]));
+        24,
+            (i) => AdminTrendPoint(
+          label: '${start.add(Duration(hours: i)).hour}h',
+          count: counts[i],
+        ),
+      );
     }
 
-    final counts = List<int>.filled(days, 0);
-    for (final r in chartReports) {
-      final dt = DateTime.tryParse(_str(r['created_at']));
+    // ── 7j / 30j : un point par jour ──────────────────────────────────────
+    if (period == 'week' || period == 'month') {
+      final days = period == 'week' ? 7 : 30;
+      final today = DateTime(now.year, now.month, now.day);
+      final start = today.subtract(Duration(days: days - 1));
+      final counts = List<int>.filled(days, 0);
+      for (final r in list) {
+        final dt = _reportDate(r);
+        if (dt == null) continue;
+        final d = DateTime(dt.year, dt.month, dt.day);
+        final idx = (d.difference(start).inHours / 24).round();
+        if (idx >= 0 && idx < days) counts[idx]++;
+      }
+      const joursCourt = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+      return List.generate(days, (i) {
+        final d = DateTime(start.year, start.month, start.day + i);
+        final label = days <= 7 ? joursCourt[d.weekday - 1] : '${d.day}/${d.month}';
+        return AdminTrendPoint(label: label, count: counts[i]);
+      });
+    }
+
+    // ── 1an : 12 mois ─────────────────────────────────────────────────────
+    if (period == 'year') return _monthlyTrend(list, 12);
+
+    // ── Tout : du plus ancien signalement à aujourd'hui (6 à 24 mois) ─────
+    DateTime? first;
+    for (final r in list) {
+      final dt = _reportDate(r);
+      if (dt != null && (first == null || dt.isBefore(first))) first = dt;
+    }
+    final span = first == null
+        ? 1
+        : (now.year - first.year) * 12 + now.month - first.month + 1;
+    return _monthlyTrend(list, span.clamp(6, 24).toInt());
+  }
+
+  List<AdminTrendPoint> _monthlyTrend(List<Map<String, dynamic>> list, int n) {
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month - (n - 1), 1);
+    final counts = List<int>.filled(n, 0);
+    for (final r in list) {
+      final dt = _reportDate(r);
       if (dt == null) continue;
-      final diff = today.difference(DateTime(dt.year, dt.month, dt.day)).inDays;
-      if (diff >= 0 && diff < days) counts[days - 1 - diff]++;
+      final idx = (dt.year - start.year) * 12 + dt.month - start.month;
+      if (idx >= 0 && idx < n) counts[idx]++;
     }
-
-    const joursCourt = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
-    return List.generate(days, (i) {
-      final d = now.subtract(Duration(days: days - 1 - i));
-      final label = days <= 7 ? joursCourt[d.weekday - 1] : '${d.day}/${d.month}';
-      return AdminTrendPoint(label: label, count: counts[i]);
+    const mois = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
+    return List.generate(n, (i) {
+      final m = DateTime(start.year, start.month + i, 1);
+      return AdminTrendPoint(label: mois[m.month - 1], count: counts[i]);
     });
   }
 
   List<String> get allCategories {
     final cats = <String>{};
     for (final r in reports) {
-      final name = _categoryName(r['category'], '');
+      final name = _reportCategory(r, '');
       if (name.isNotEmpty) cats.add(name);
     }
     return cats.toList()..sort();
   }
+
+  int countByStatus(String status) {
+    if (status == 'pending') {
+      return reports
+          .where((r) => r['status'] == 'pending' || r['status'] == 'acknowledged')
+          .length;
+    }
+    return reports.where((r) => r['status'] == status).length;
+  }
+
 
   // ── Actualités (signalements résolus) ─────────────────────────────────────
   List<AdminNewsEntry> get newsItems => reports
@@ -399,18 +513,17 @@ class AdminDashboardController extends GetxController {
         });
       }
       if (resp.success == true && resp.data != null) {
-        final raw = resp.data;
-        List items = [];
-        if (raw is Map) {
-          final inner = raw['data'] ?? raw['items'] ?? [];
-          if (inner is List) items = inner;
-        } else if (raw is List) {
-          items = raw;
-        }
+        final items = _extractList(resp.data);
         reports.assignAll(items
             .whereType<Map>()
             .map((e) => Map<String, dynamic>.from(e))
             .toList());
+        if (reports.isNotEmpty) {
+          final r = reports.first;
+          debugPrint('[AdminDash] ${reports.length} reports | '
+              'created_at=${r['created_at']} | status=${r['status']} | '
+              'severity=${r['severity']} | category=${r['category']}');
+        }
       }
       lastUpdatedAt.value = DateTime.now();
     } catch (e) {
@@ -557,151 +670,50 @@ class AdminDashboardScreen extends StatelessWidget {
     final ctrl = Get.put(AdminDashboardController());
 
     return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: Obx(() => IndexedStack(
-        index: ctrl.currentIndex.value,
-        children: ctrl.isMairie.value
-            ? const [
-          _MairieHomePage(),
-          _MairieSupervisionPage(),
-          _MairieNewsTab(),
-          _AdminSettingsPage(),
-        ]
-            : const [
-          _AdminHomePage(),
-          _AdminRoutingPage(),
-          _AdminAgentsPage(),
-          _AdminUsersPage(),
-          _AdminSettingsPage(),
-        ],
-      )),
-      bottomNavigationBar: Obx(() => _AdminBottomNav(
-        isMairie: ctrl.isMairie.value,
-        currentIndex: ctrl.currentIndex.value,
-        onTap: ctrl.changePage,
-        pendingCount: ctrl.countByStatus('pending'),
-      )),
+      backgroundColor: Neo.bg,
+      body: NeoBackdrop(
+        child: Obx(() => IndexedStack(
+          index: ctrl.currentIndex.value,
+          children: ctrl.isMairie.value
+              ? const [
+            _MairieHomePage(),
+            _MairieSupervisionPage(),
+            _MairieNewsTab(),
+            _AdminSettingsPage(),
+          ]
+              : const [
+            _AdminHomePage(),
+            _AdminRoutingPage(),
+            _AdminAgentsPage(),
+            _AdminUsersPage(),
+            _AdminSettingsPage(),
+          ],
+        )),
+      ),
+      bottomNavigationBar: Obx(() {
+        final mairie = ctrl.isMairie.value;
+        final pending = ctrl.countByStatus('pending');
+        return NeoBottomNav(
+          index: ctrl.currentIndex.value,
+          onChanged: ctrl.changePage,
+          items: mairie
+              ? const [
+            NeoNavItem(Icons.account_balance_outlined, Icons.account_balance, 'Accueil'),
+            NeoNavItem(Icons.visibility_outlined, Icons.visibility, 'Suivi'),
+            NeoNavItem(Icons.newspaper_outlined, Icons.newspaper, 'Actualités'),
+            NeoNavItem(Icons.settings_outlined, Icons.settings, 'Paramètres'),
+          ]
+              : [
+            const NeoNavItem(Icons.dashboard_outlined, Icons.dashboard, 'Accueil'),
+            NeoNavItem(Icons.route_outlined, Icons.route, 'Routage', badge: pending),
+            const NeoNavItem(Icons.support_agent_outlined, Icons.support_agent, 'Agents'),
+            const NeoNavItem(Icons.people_outline, Icons.people, 'Utilisateurs'),
+            const NeoNavItem(Icons.settings_outlined, Icons.settings, 'Réglages'),
+          ],
+        );
+      }),
     );
   }
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-//  BOTTOM NAV
-// ════════════════════════════════════════════════════════════════════════════
-
-class _AdminBottomNav extends StatelessWidget {
-  final bool isMairie;
-  final int currentIndex;
-  final ValueChanged<int> onTap;
-  final int pendingCount;
-
-  const _AdminBottomNav({
-    required this.isMairie,
-    required this.currentIndex,
-    required this.onTap,
-    required this.pendingCount,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    const accent = AppTheme.primaryGreen;
-    final items = isMairie
-        ? [
-      const _NavDef(Icons.account_balance_outlined, Icons.account_balance, 'Accueil', 0),
-      const _NavDef(Icons.visibility_outlined, Icons.visibility, 'Suivi', 0),
-      const _NavDef(Icons.newspaper_outlined, Icons.newspaper, 'Actualités', 0),
-      const _NavDef(Icons.settings_outlined, Icons.settings, 'Paramètres', 0),
-    ]
-        : [
-      const _NavDef(Icons.dashboard_outlined, Icons.dashboard, 'Accueil', 0),
-      _NavDef(Icons.route_outlined, Icons.route, 'Routage', pendingCount),
-      const _NavDef(Icons.support_agent_outlined, Icons.support_agent, 'Agents', 0),
-      const _NavDef(Icons.people_outline, Icons.people, 'Utilisateurs', 0),
-      const _NavDef(Icons.settings_outlined, Icons.settings, 'Paramètres', 0),
-    ];
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-              color: AppTheme.darkBlue.op(0.08),
-              blurRadius: 20,
-              offset: const Offset(0, -4))
-        ],
-      ),
-      child: SafeArea(
-        child: SizedBox(
-          height: 64,
-          child: Row(
-            children: List.generate(items.length, (i) {
-              final item = items[i];
-              final active = currentIndex == i;
-              return Expanded(
-                child: GestureDetector(
-                  onTap: () => onTap(i),
-                  behavior: HitTestBehavior.opaque,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Stack(clipBehavior: Clip.none, children: [
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: active ? accent.op(0.12) : Colors.transparent,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Icon(active ? item.activeIcon : item.icon,
-                              color: active ? accent : AppTheme.greyMedium, size: 20),
-                        ),
-                        if (item.badge > 0)
-                          Positioned(
-                            top: -4,
-                            right: -4,
-                            child: Container(
-                              constraints: const BoxConstraints(minWidth: 16),
-                              height: 16,
-                              padding: const EdgeInsets.symmetric(horizontal: 4),
-                              decoration: BoxDecoration(
-                                color: AppTheme.warning,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.white, width: 1.5),
-                              ),
-                              child: Center(
-                                  child: Text('${item.badge}',
-                                      style: const TextStyle(
-                                          color: AppTheme.darkBlue,
-                                          fontSize: 9,
-                                          fontWeight: FontWeight.bold))),
-                            ),
-                          ),
-                      ]),
-                      const SizedBox(height: 2),
-                      Text(item.label,
-                          style: TextStyle(
-                            fontFamily: AppTheme.fontFamily,
-                            fontSize: 9,
-                            fontWeight: active ? FontWeight.w700 : FontWeight.w400,
-                            color: active ? accent : AppTheme.greyMedium,
-                          )),
-                    ],
-                  ),
-                ),
-              );
-            }),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _NavDef {
-  final IconData icon, activeIcon;
-  final String label;
-  final int badge;
-  const _NavDef(this.icon, this.activeIcon, this.label, this.badge);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -717,199 +729,108 @@ class _AdminHomePage extends StatelessWidget {
 
     return Obx(() {
       if (ctrl.isLoading && ctrl.data == null && ctrl.reports.isEmpty) {
-        return const Center(
-            child: CircularProgressIndicator(color: AppTheme.primaryGreen));
+        return const NeoLoading();
       }
       return RefreshIndicator(
         onRefresh: ctrl.refresh,
-        color: AppTheme.primaryGreen,
-        child: CustomScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            SliverToBoxAdapter(child: _AdminHeader(ctrl: ctrl)),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-              sliver: SliverList(
-                  delegate: SliverChildListDelegate([
-                    Obx(() {
-                      final n = ctrl.countByStatus('pending');
-                      if (n == 0) return const SizedBox.shrink();
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        child: _PendingBanner(count: n, onTap: () => ctrl.changePage(1)),
-                      );
-                    }),
-
-                    Obx(() {
-                      final total = ctrl.reports.length;
-                      final resolved = ctrl.countByStatus('resolved');
-                      return _KpiRow(items: [
-                        _KpiItem('${ctrl.apiTotalReports ?? total}', 'Signalements',
-                            Icons.add_alert_outlined, AppTheme.yellow),
-                        _KpiItem('$resolved', 'Résolus', Icons.check_circle_outline,
-                            AppTheme.success),
-                        _KpiItem('${ctrl.apiNewUsers}', 'Nouveaux\nutilisateurs',
-                            Icons.person_add_outlined, AppTheme.info),
-                      ]);
-                    }),
-                    const SizedBox(height: 22),
-
-                    const _DashSectionTitle(title: 'Utilisateurs', icon: Icons.people_outline),
-                    const SizedBox(height: 10),
-                    Obx(() => _UsersRow(overview: ctrl.overview)),
-                    const SizedBox(height: 22),
-
-                    const _DashSectionTitle(
-                        title: 'Tendance des signalements', icon: Icons.show_chart_rounded),
-                    const SizedBox(height: 6),
-                    _ChartPeriodSelector(ctrl: ctrl),
-                    const SizedBox(height: 10),
-                    Obx(() => _TrendLineChart(
-                        points: ctrl.trendData, period: ctrl.chartPeriod.value)),
-                    const SizedBox(height: 22),
-
-                    const _DashSectionTitle(
-                        title: 'Répartition par statut', icon: Icons.bar_chart_outlined),
-                    const SizedBox(height: 10),
-                    Obx(() => _StatusBreakdownCard(
-                        byStatus: ctrl.apiReportsByStatus,
-                        localCounts: ctrl.statusBreakdown)),
-                    const SizedBox(height: 22),
-
-                    Row(
-                      children: [
-                        const _DashSectionTitle(
-                            title: 'Par catégorie', icon: Icons.pie_chart_outline),
-                        const Spacer(),
-                        _CategoryFilterChip(ctrl: ctrl),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Obx(() {
-                      final api = ctrl.apiCategoryBreakdown;
-                      // Le filtre catégorie s'applique aux données locales.
-                      final useApi = api.isNotEmpty && ctrl.selectedCategory.value.isEmpty;
-                      return _CategoryChart(data: useApi ? api : ctrl.categoryBreakdown);
-                    }),
-                    const SizedBox(height: 22),
-
-                    const _DashSectionTitle(
-                        title: 'Sévérité', icon: Icons.warning_amber_outlined),
-                    const SizedBox(height: 10),
-                    Obx(() {
-                      final local = ctrl.severityBreakdown;
-                      return _SeverityCards(
-                        low: ctrl.apiSeverity('low') ?? local['low'] ?? 0,
-                        medium: ctrl.apiSeverity('medium') ?? local['medium'] ?? 0,
-                        high: ctrl.apiSeverity('high') ?? local['high'] ?? 0,
-                      );
-                    }),
-                    const SizedBox(height: 22),
-
-                    Obx(() {
-                      final agents = ctrl.agents;
-                      if (agents.isEmpty) return const SizedBox.shrink();
-                      return Column(children: [
-                        const _DashSectionTitle(
-                            title: 'Top agents', icon: Icons.emoji_events_outlined),
-                        const SizedBox(height: 10),
-                        _AgentPodium(agents: agents),
-                        const SizedBox(height: 22),
-                      ]);
-                    }),
-
-                    const SizedBox(height: 40),
-                  ])),
+        color: Neo.blue,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+          padding: EdgeInsets.zero,
+          children: [
+            Obx(() => NeoGreetingHeader(
+                  greeting: 'Administration,',
+                  name: _str(AuthService.instance.userName.value, 'Admin').split(' ').first,
+                  notifications: ctrl.unreadNotifications.value,
+                  onBell: () => Get.to(() => const MairieNotificationsScreen()),
+                )),
+            const SizedBox(height: 8),
+            Obx(() => NeoChipRow(
+                  chips: AdminDashboardController.periods.entries
+                      .map((e) => NeoChip(
+                            label: e.value,
+                            selected: ctrl.selectedPeriod.value == e.key,
+                            onTap: () => ctrl.changePeriod(e.key),
+                          ))
+                      .toList(),
+                )),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 28),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Obx(() {
+                  final n = ctrl.countByStatus('pending');
+                  if (n == 0) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 18),
+                    child: _PendingBanner(count: n, onTap: () => ctrl.changePage(1)),
+                  );
+                }),
+                NeoReveal(
+                  child: Obx(() {
+                    final total = ctrl.reports.length;
+                    return NeoStatsStrip(items: [
+                      NeoStat('${ctrl.apiTotalReports ?? total}', 'Signalements'),
+                      NeoStat('${ctrl.countByStatus('resolved')}', 'Résolus', Neo.success),
+                      NeoStat('${ctrl.apiNewUsers}', 'Nouveaux\nutilisateurs', Neo.info),
+                    ]);
+                  }),
+                ),
+                const SizedBox(height: 24),
+                const NeoSectionTitle('Utilisateurs', icon: Icons.people_outline),
+                const SizedBox(height: 12),
+                Obx(() => _UsersRow(overview: ctrl.overview)),
+                const SizedBox(height: 24),
+                const NeoSectionTitle('Tendance des signalements', icon: Icons.show_chart_rounded),
+                const SizedBox(height: 10),
+                _ChartPeriodSelector(ctrl: ctrl),
+                const SizedBox(height: 12),
+                Obx(() => _TrendLineChart(points: ctrl.trendData, period: ctrl.chartPeriod.value)),
+                const SizedBox(height: 24),
+                const NeoSectionTitle('Répartition par statut', icon: Icons.bar_chart_outlined),
+                const SizedBox(height: 12),
+                Obx(() => _StatusBreakdownCard(
+                  byStatus: ctrl.useApiStats ? ctrl.apiReportsByStatus : null,
+                  localCounts: ctrl.statusBreakdown,
+                )),
+                const SizedBox(height: 24),
+                Row(children: [
+                  const Expanded(child: NeoSectionTitle('Par catégorie', icon: Icons.pie_chart_outline)),
+                  _CategoryFilterChip(ctrl: ctrl),
+                ]),
+                const SizedBox(height: 12),
+                Obx(() {
+                  final api = ctrl.apiCategoryBreakdown;
+                  final useApi = ctrl.useApiStats && api.isNotEmpty;
+                  return _CategoryChart(data: useApi ? api : ctrl.categoryBreakdown);
+                }),
+                const SizedBox(height: 24),
+                const NeoSectionTitle('Sévérité', icon: Icons.warning_amber_outlined),
+                const SizedBox(height: 12),
+                Obx(() {
+                  final local = ctrl.severityBreakdown;
+                  final useApi = ctrl.useApiStats;
+                  return _SeverityCards(
+                    low: (useApi ? ctrl.apiSeverity('low') : null) ?? local['low'] ?? 0,
+                    medium: (useApi ? ctrl.apiSeverity('medium') : null) ?? local['medium'] ?? 0,
+                    high: (useApi ? ctrl.apiSeverity('high') : null) ?? local['high'] ?? 0,
+                  );
+                }),
+                const SizedBox(height: 24),
+                Obx(() {
+                  final agents = ctrl.agents;
+                  if (agents.isEmpty) return const SizedBox.shrink();
+                  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const NeoSectionTitle('Top agents', icon: Icons.emoji_events_outlined),
+                    const SizedBox(height: 12),
+                    _AgentPodium(agents: agents),
+                  ]);
+                }),
+              ]),
             ),
           ],
         ),
       );
     });
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-//  HEADER ADMIN SYSTÈME
-// ════════════════════════════════════════════════════════════════════════════
-
-class _AdminHeader extends StatelessWidget {
-  final AdminDashboardController ctrl;
-  const _AdminHeader({required this.ctrl});
-
-  @override
-  Widget build(BuildContext context) {
-    final topInset = MediaQuery.of(context).padding.top;
-    return SizedBox(
-      height: 186 + topInset,
-      child: Stack(
-        children: [
-          ClipRRect(
-            borderRadius: const BorderRadius.only(
-              bottomLeft: Radius.circular(AppTheme.radiusXl),
-              bottomRight: Radius.circular(AppTheme.radiusXl),
-            ),
-            child: SizedBox.expand(
-              child: Container(
-                decoration: const BoxDecoration(gradient: AppTheme.heroGradient),
-                child: const SenegalPatternBackground(),
-              ),
-            ),
-          ),
-          const Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: ClipRRect(
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(AppTheme.radiusXl),
-                bottomRight: Radius.circular(AppTheme.radiusXl),
-              ),
-              child: FlagStripe(),
-            ),
-          ),
-          Positioned.fill(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(20, topInset + 14, 20, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.white.op(0.16),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white.op(0.25)),
-                      ),
-                      child: const Icon(Icons.admin_panel_settings_outlined,
-                          color: AppTheme.yellow, size: 22),
-                    ),
-                    const SizedBox(width: 12),
-                    const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('Administration',
-                          style: TextStyle(
-                              fontFamily: AppTheme.fontFamily,
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold)),
-                      Text('Citoyen Alerte — Sénégal',
-                          style: TextStyle(
-                              fontFamily: AppTheme.fontFamily,
-                              color: Colors.white70,
-                              fontSize: 11)),
-                    ]),
-                    const Spacer(),
-                    Obx(() => _NotifBell(count: ctrl.unreadNotifications.value)),
-                  ]),
-                  const SizedBox(height: 16),
-                  _PeriodScrollBar(ctrl: ctrl),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 
@@ -925,221 +846,98 @@ class _MairieHomePage extends StatelessWidget {
     final ctrl = Get.find<AdminDashboardController>();
 
     return Obx(() {
-      if (ctrl.isLoadingReports.value && ctrl.reports.isEmpty) {
-        return const Center(
-            child: CircularProgressIndicator(color: AppTheme.primaryGreen));
-      }
+      if (ctrl.isLoadingReports.value && ctrl.reports.isEmpty) return const NeoLoading();
       return RefreshIndicator(
         onRefresh: ctrl.refresh,
-        color: AppTheme.primaryGreen,
-        child: CustomScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            SliverToBoxAdapter(child: _MairieHeader(ctrl: ctrl)),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-              sliver: SliverList(
-                  delegate: SliverChildListDelegate([
-                    Obx(() {
-                      final n = ctrl.countByStatus('pending');
-                      if (n == 0) return const SizedBox.shrink();
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        child: _PendingBanner(count: n, onTap: () => ctrl.changePage(1)),
-                      );
-                    }),
-
-                    Obx(() => _MairieStatsGrid(
-                      total: ctrl.reports.length,
-                      pending: ctrl.countByStatus('pending'),
-                      routed: ctrl.countByStatus('routed'),
-                      resolved: ctrl.countByStatus('resolved'),
-                    )),
-                    const SizedBox(height: 6),
-
-                    Obx(() {
-                      final t = ctrl.lastUpdatedAt.value;
-                      if (t == null) return const SizedBox.shrink();
-                      return Padding(
-                        padding: const EdgeInsets.only(left: 2, bottom: 14),
-                        child: Row(children: [
-                          const Icon(Icons.sync_rounded, size: 11, color: AppTheme.greyMedium),
-                          const SizedBox(width: 4),
-                          Text(
-                              'Mis à jour à ${t.hour.toString().padLeft(2, '0')}:'
-                                  '${t.minute.toString().padLeft(2, '0')} · auto',
-                              style: AppTheme.caption),
-                        ]),
-                      );
-                    }),
-
-                    Row(children: [
-                      Expanded(child: _ChartPeriodSelector(ctrl: ctrl)),
-                      const SizedBox(width: 8),
-                      _CategoryFilterChip(ctrl: ctrl),
+        color: Neo.blue,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+          padding: EdgeInsets.zero,
+          children: [
+            Obx(() => NeoGreetingHeader(
+                  greeting: ctrl.mairieZone.value.isNotEmpty ? 'Zone : ${ctrl.mairieZone.value}' : 'Suivi des signalements',
+                  name: ctrl.mairieName.value.isNotEmpty ? ctrl.mairieName.value : 'Mairie',
+                  notifications: ctrl.unreadNotifications.value,
+                  onBell: () => Get.to(() => const MairieNotificationsScreen()),
+                )),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Obx(() {
+                  final n = ctrl.countByStatus('pending');
+                  if (n == 0) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 18),
+                    child: _PendingBanner(count: n, onTap: () => ctrl.changePage(1)),
+                  );
+                }),
+                NeoReveal(
+                  child: Obx(() => _MairieStatsGrid(
+                        total: ctrl.reports.length,
+                        pending: ctrl.countByStatus('pending'),
+                        routed: ctrl.countByStatus('routed'),
+                        resolved: ctrl.countByStatus('resolved'),
+                      )),
+                ),
+                Obx(() {
+                  final t = ctrl.lastUpdatedAt.value;
+                  if (t == null) return const SizedBox(height: 16);
+                  return Padding(
+                    padding: const EdgeInsets.only(left: 2, top: 8, bottom: 14),
+                    child: Row(children: [
+                      const Icon(Icons.sync_rounded, size: 12, color: Neo.muted),
+                      const SizedBox(width: 4),
+                      Text('Mis à jour à ${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')} · auto',
+                          style: Neo.t(11, c: Neo.muted)),
                     ]),
-                    const SizedBox(height: 16),
-
-                    const _DashSectionTitle(title: 'Tendance', icon: Icons.show_chart_rounded),
-                    const SizedBox(height: 10),
-                    Obx(() => _TrendLineChart(
-                        points: ctrl.trendData, period: ctrl.chartPeriod.value)),
-                    const SizedBox(height: 22),
-
-                    const _DashSectionTitle(
-                        title: 'Répartition par statut', icon: Icons.bar_chart_outlined),
-                    const SizedBox(height: 10),
-                    Obx(() => _StatusBreakdownCard(
-                        byStatus: null, localCounts: ctrl.statusBreakdown)),
-                    const SizedBox(height: 22),
-
-                    const _DashSectionTitle(
-                        title: 'Par catégorie', icon: Icons.pie_chart_outline_rounded),
-                    const SizedBox(height: 10),
-                    Obx(() => _CategoryChart(data: ctrl.categoryBreakdown)),
-                    const SizedBox(height: 22),
-
-                    const _DashSectionTitle(
-                        title: 'Sévérité', icon: Icons.warning_amber_outlined),
-                    const SizedBox(height: 10),
-                    Obx(() {
-                      final sv = ctrl.severityBreakdown;
-                      return _SeverityCards(
-                          low: sv['low'] ?? 0,
-                          medium: sv['medium'] ?? 0,
-                          high: sv['high'] ?? 0);
-                    }),
-                    const SizedBox(height: 22),
-
-                    const _DashSectionTitle(title: 'Récents', icon: Icons.history_outlined),
-                    const SizedBox(height: 10),
-                    Obx(() {
-                      final items = ctrl.chartReports.take(5).toList();
-                      if (items.isEmpty) {
-                        return const _EmptyState(
-                          icon: Icons.inbox_outlined,
-                          message: 'Aucun signalement sur cette période',
-                        );
-                      }
-                      return Column(
-                        children: items.map((r) => _ReportMiniCard(report: r)).toList(),
-                      );
-                    }),
-                    const SizedBox(height: 40),
-                  ])),
+                  );
+                }),
+                Row(children: [
+                  Expanded(child: _ChartPeriodSelector(ctrl: ctrl)),
+                  const SizedBox(width: 10),
+                  _CategoryFilterChip(ctrl: ctrl),
+                ]),
+                const SizedBox(height: 18),
+                const NeoSectionTitle('Tendance', icon: Icons.show_chart_rounded),
+                const SizedBox(height: 12),
+                Obx(() => _TrendLineChart(points: ctrl.trendData, period: ctrl.chartPeriod.value)),
+                const SizedBox(height: 24),
+                const NeoSectionTitle('Répartition par statut', icon: Icons.bar_chart_outlined),
+                const SizedBox(height: 12),
+                Obx(() => _StatusBreakdownCard(byStatus: null, localCounts: ctrl.statusBreakdown)),
+                const SizedBox(height: 24),
+                const NeoSectionTitle('Par catégorie', icon: Icons.pie_chart_outline_rounded),
+                const SizedBox(height: 12),
+                Obx(() => _CategoryChart(data: ctrl.categoryBreakdown)),
+                const SizedBox(height: 24),
+                const NeoSectionTitle('Sévérité', icon: Icons.warning_amber_outlined),
+                const SizedBox(height: 12),
+                Obx(() {
+                  final sv = ctrl.severityBreakdown;
+                  return _SeverityCards(low: sv['low'] ?? 0, medium: sv['medium'] ?? 0, high: sv['high'] ?? 0);
+                }),
+                const SizedBox(height: 24),
+                const NeoSectionTitle('Récents', icon: Icons.history_outlined),
+                const SizedBox(height: 12),
+                Obx(() {
+                  final items = ctrl.recentReports;
+                  if (items.isEmpty) {
+                    return const NeoCard(
+                      child: NeoEmpty(
+                        icon: Icons.inbox_outlined,
+                        title: 'Aucun signalement',
+                        message: 'Rien à afficher sur cette période.',
+                      ),
+                    );
+                  }
+                  return Column(children: items.map((r) => _ReportMiniCard(report: r)).toList());
+                }),
+              ]),
             ),
           ],
         ),
       );
     });
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-//  HEADER MAIRIE
-// ════════════════════════════════════════════════════════════════════════════
-
-class _MairieHeader extends StatelessWidget {
-  final AdminDashboardController ctrl;
-  const _MairieHeader({required this.ctrl});
-
-  @override
-  Widget build(BuildContext context) {
-    final topInset = MediaQuery.of(context).padding.top;
-    return SizedBox(
-      height: 140 + topInset,
-      child: Stack(
-        children: [
-          ClipRRect(
-            borderRadius: const BorderRadius.only(
-              bottomLeft: Radius.circular(AppTheme.radiusXl),
-              bottomRight: Radius.circular(AppTheme.radiusXl),
-            ),
-            child: SizedBox.expand(
-              child: Container(
-                decoration: const BoxDecoration(gradient: AppTheme.heroGradient),
-                child: const SenegalPatternBackground(),
-              ),
-            ),
-          ),
-          const Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: ClipRRect(
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(AppTheme.radiusXl),
-                bottomRight: Radius.circular(AppTheme.radiusXl),
-              ),
-              child: FlagStripe(),
-            ),
-          ),
-          Positioned.fill(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(20, topInset + 14, 20, 20),
-              child: Row(children: [
-                Container(
-                  padding: const EdgeInsets.all(9),
-                  decoration: BoxDecoration(
-                    color: Colors.white.op(0.16),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white.op(0.25)),
-                  ),
-                  child: const Icon(Icons.account_balance,
-                      color: AppTheme.yellow, size: 22),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Obx(() => Text(
-                        ctrl.mairieName.value.isNotEmpty
-                            ? ctrl.mairieName.value
-                            : 'Mairie',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontFamily: AppTheme.fontFamily,
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold),
-                      )),
-                      Obx(() => Text(
-                        ctrl.mairieZone.value.isNotEmpty
-                            ? 'Zone : ${ctrl.mairieZone.value}'
-                            : 'Suivi des signalements',
-                        style: TextStyle(
-                            fontFamily: AppTheme.fontFamily,
-                            color: Colors.white.op(0.8),
-                            fontSize: 11),
-                      )),
-                    ],
-                  ),
-                ),
-                Obx(() => _NotifBell(count: ctrl.unreadNotifications.value)),
-                const SizedBox(width: 8),
-                Obx(() => Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppTheme.yellow.op(0.2),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppTheme.yellow.op(0.4)),
-                  ),
-                  child: Text('${ctrl.countByStatus('pending')} en attente',
-                      style: const TextStyle(
-                          fontFamily: AppTheme.fontFamily,
-                          color: AppTheme.yellow,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 11)),
-                )),
-              ]),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 
@@ -1154,139 +952,100 @@ class _TrendLineChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (points.isEmpty) return _emptyChart();
+    if (points.isEmpty) {
+      return const NeoCard(
+        child: NeoEmpty(icon: Icons.show_chart_rounded, title: 'Pas encore de données', message: 'Le graphique apparaîtra ici.'),
+      );
+    }
 
     final maxVal = points.fold<int>(0, (m, p) => p.count > m ? p.count : m);
     final maxY = (maxVal < 4 ? 4 : maxVal + 2).toDouble();
     final total = points.fold<int>(0, (s, p) => s + p.count);
-    final showEvery = period == 'year' ? 13 : (period == 'month' ? 5 : 1);
-    final interval = (maxY / 4).clamp(1.0, double.infinity).toDouble();
+    final n = points.length;
+    final showEvery = n <= 7 ? 1 : (n <= 12 ? 2 : (n <= 24 ? 4 : 5));    final interval = (maxY / 4).clamp(1.0, double.infinity).toDouble();
+    final spots = List.generate(points.length, (i) => FlSpot(i.toDouble(), points[i].count.toDouble()));
 
-    final spots = List.generate(
-        points.length, (i) => FlSpot(i.toDouble(), points[i].count.toDouble()));
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 16, 16, 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        boxShadow: AppTheme.cardShadow(),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            Text('$total signalement${total != 1 ? 's' : ''}',
-                style: const TextStyle(
-                    fontFamily: AppTheme.fontFamily,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.darkBlue)),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryGreen.op(0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(AdminDashboardController.chartPeriods[period] ?? period,
-                  style: const TextStyle(
-                      fontFamily: AppTheme.fontFamily,
-                      color: AppTheme.primaryGreen,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold)),
+    return NeoCard(
+      padding: const EdgeInsets.fromLTRB(14, 16, 16, 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text('$total signalement${total != 1 ? 's' : ''}', style: Neo.t(13, w: FontWeight.w700)),
+          const Spacer(),
+          NeoPill(label: AdminDashboardController.chartPeriods[period] ?? period, color: Neo.blue),
+        ]),
+        const SizedBox(height: 14),
+        SizedBox(
+          height: 150,
+          child: LineChart(LineChartData(
+            minY: 0,
+            maxY: maxY,
+            gridData: FlGridData(
+              show: true,
+              drawVerticalLine: false,
+              horizontalInterval: interval,
+              getDrawingHorizontalLine: (_) => FlLine(color: Neo.line.op(0.7), strokeWidth: 1),
             ),
-          ]),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 150,
-            child: LineChart(LineChartData(
-              minY: 0,
-              maxY: maxY,
-              gridData: FlGridData(
-                show: true,
-                drawVerticalLine: false,
-                horizontalInterval: interval,
-                getDrawingHorizontalLine: (_) =>
-                    FlLine(color: AppTheme.greyLight.op(0.6), strokeWidth: 1),
-              ),
-              titlesData: FlTitlesData(
-                leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                rightTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 28,
-                      interval: interval,
-                      getTitlesWidget: (v, _) => Padding(
-                        padding: const EdgeInsets.only(left: 6),
-                        child: Text('${v.toInt()}', style: AppTheme.caption),
-                      ),
-                    )),
-                bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 24,
-                      interval: 1,
-                      getTitlesWidget: (v, _) {
-                        final i = v.toInt();
-                        if (i < 0 || i >= points.length) return const SizedBox.shrink();
-                        if (i % showEvery != 0) return const SizedBox.shrink();
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Text(points[i].label, style: AppTheme.caption),
-                        );
-                      },
-                    )),
-              ),
-              borderData: FlBorderData(show: false),
-              lineBarsData: [
-                LineChartBarData(
-                  spots: spots,
-                  isCurved: true,
-                  curveSmoothness: 0.35,
-                  color: AppTheme.primaryGreen,
-                  barWidth: 2.5,
-                  dotData: FlDotData(
-                    show: points.length <= 14,
-                    getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(
-                      radius: 3.5,
-                      color: AppTheme.primaryGreen,
-                      strokeWidth: 2,
-                      strokeColor: Colors.white,
-                    ),
-                  ),
-                  belowBarData: BarAreaData(
-                    show: true,
-                    gradient: LinearGradient(
-                      colors: [
-                        AppTheme.primaryGreen.op(0.20),
-                        AppTheme.primaryGreen.op(0.01),
-                      ],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                    ),
+            titlesData: FlTitlesData(
+              leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              rightTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 28,
+                interval: interval,
+                getTitlesWidget: (v, _) => Padding(
+                  padding: const EdgeInsets.only(left: 6),
+                  child: Text('${v.toInt()}', style: Neo.t(10, c: Neo.muted)),
+                ),
+              )),
+              bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 24,
+                interval: 1,
+                getTitlesWidget: (v, _) {
+                  final i = v.toInt();
+                  if (i < 0 || i >= points.length) return const SizedBox.shrink();
+                  if (i % showEvery != 0) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(points[i].label, style: Neo.t(10, c: Neo.muted)),
+                  );
+                },
+              )),
+            ),
+            borderData: FlBorderData(show: false),
+            lineBarsData: [
+              LineChartBarData(
+                spots: spots,
+                isCurved: true,
+                curveSmoothness: 0.35,
+                color: Neo.blue,
+                barWidth: 3,
+                dotData: FlDotData(
+                  show: points.length <= 14,
+                  getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(
+                    radius: 3.8,
+                    color: Neo.blue,
+                    strokeWidth: 2,
+                    strokeColor: Colors.white,
                   ),
                 ),
-              ],
-            )),
-          ),
-        ],
-      ),
+                belowBarData: BarAreaData(
+                  show: true,
+                  gradient: LinearGradient(
+                    colors: [Neo.blue.op(0.22), Neo.blue.op(0.01)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                ),
+              ),
+            ],
+          )),
+        ),
+      ]),
     );
   }
-
-  Widget _emptyChart() => Container(
-    height: 130,
-    decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        boxShadow: AppTheme.cardShadow()),
-    child: const Center(
-      child: _EmptyState(
-          icon: Icons.show_chart_rounded, message: 'Pas encore de données'),
-    ),
-  );
 }
 
 class _CategoryChart extends StatefulWidget {
@@ -1301,12 +1060,12 @@ class _CategoryChartState extends State<_CategoryChart> {
   int _touchedIndex = -1;
 
   static const _colors = [
-    AppTheme.primaryGreen,
-    AppTheme.info,
-    AppTheme.warning,
-    AppTheme.coral,
-    AppTheme.purple,
-    AppTheme.lightGreen,
+    Neo.blue,
+    Neo.info,
+    Neo.warning,
+    Neo.danger,
+    Neo.purple,
+    Neo.blueLight,
     Color(0xFF0EA5E9),
     Color(0xFFF97316),
   ];
@@ -1314,58 +1073,39 @@ class _CategoryChartState extends State<_CategoryChart> {
   @override
   Widget build(BuildContext context) {
     if (widget.data.isEmpty || widget.data.values.every((v) => v == 0)) {
-      return Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            boxShadow: AppTheme.cardShadow()),
-        child: const _EmptyState(
-            icon: Icons.pie_chart_outline, message: 'Pas de données catégorie'),
+      return const NeoCard(
+        child: NeoEmpty(icon: Icons.pie_chart_outline, title: 'Pas de données', message: 'Aucune catégorie à afficher.'),
       );
     }
 
-    final entries = (widget.data.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value)))
-        .take(8)
-        .toList();
+    final entries = (widget.data.entries.toList()..sort((a, b) => b.value.compareTo(a.value))).take(8).toList();
     final total = entries.fold<int>(0, (a, b) => a + b.value);
 
-    return Container(
+    return NeoCard(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-          boxShadow: AppTheme.cardShadow()),
       child: Column(children: [
         SizedBox(
           height: 160,
           child: PieChart(PieChartData(
-            sectionsSpace: 2,
+            sectionsSpace: 3,
             centerSpaceRadius: 44,
             pieTouchData: PieTouchData(
               touchCallback: (e, resp) {
                 setState(() {
-                  _touchedIndex = (e is FlTapUpEvent)
-                      ? -1
-                      : resp?.touchedSection?.touchedSectionIndex ?? -1;
+                  _touchedIndex = (e is FlTapUpEvent) ? -1 : resp?.touchedSection?.touchedSectionIndex ?? -1;
                 });
               },
             ),
             sections: List.generate(entries.length, (i) {
               final e = entries[i];
               final pct = total > 0 ? (e.value / total * 100) : 0.0;
-              final isTouched = i == _touchedIndex;
+              final touched = i == _touchedIndex;
               return PieChartSectionData(
                 value: e.value.toDouble(),
                 color: _colors[i % _colors.length],
-                title: isTouched ? '${pct.round()}%\n${e.key}' : '${pct.round()}%',
-                radius: isTouched ? 46 : 34,
-                titleStyle: TextStyle(
-                  fontSize: isTouched ? 10 : 9,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
+                title: touched ? '${pct.round()}%\n${e.key}' : '${pct.round()}%',
+                radius: touched ? 46 : 34,
+                titleStyle: TextStyle(fontSize: touched ? 10 : 9, fontWeight: FontWeight.bold, color: Colors.white),
               );
             }),
           )),
@@ -1378,39 +1118,28 @@ class _CategoryChartState extends State<_CategoryChart> {
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(children: [
-              Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+              Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
               const SizedBox(width: 8),
               Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(children: [
-                      Expanded(
-                          child: Text(e.key,
-                              style: AppTheme.body, overflow: TextOverflow.ellipsis)),
-                      Text('${e.value}',
-                          style: TextStyle(
-                              fontFamily: AppTheme.fontFamily,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: color)),
-                      const SizedBox(width: 6),
-                      SizedBox(
-                          width: 30,
-                          child: Text('${(pct * 100).round()}%', style: AppTheme.caption)),
-                    ]),
-                    const SizedBox(height: 3),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
-                      child: LinearProgressIndicator(
-                        value: pct,
-                        minHeight: 4,
-                        backgroundColor: color.op(0.1),
-                        valueColor: AlwaysStoppedAnimation<Color>(color),
-                      ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(child: Text(e.key, overflow: TextOverflow.ellipsis, style: Neo.t(12.5))),
+                    Text('${e.value}', style: Neo.t(12, w: FontWeight.w700, c: color)),
+                    const SizedBox(width: 6),
+                    SizedBox(width: 32, child: Text('${(pct * 100).round()}%', style: Neo.t(10.5, c: Neo.muted))),
+                  ]),
+                  const SizedBox(height: 4),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: LinearProgressIndicator(
+                      value: pct,
+                      minHeight: 5,
+                      backgroundColor: color.op(0.12),
+                      valueColor: AlwaysStoppedAnimation<Color>(color),
                     ),
-                  ])),
+                  ),
+                ]),
+              ),
             ]),
           );
         }),
@@ -1420,44 +1149,8 @@ class _CategoryChartState extends State<_CategoryChart> {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-//  WIDGETS FILTRES
+//  FILTRES
 // ════════════════════════════════════════════════════════════════════════════
-
-class _PeriodScrollBar extends StatelessWidget {
-  final AdminDashboardController ctrl;
-  const _PeriodScrollBar({required this.ctrl});
-
-  @override
-  Widget build(BuildContext context) {
-    return Obx(() => SizedBox(
-      height: 34,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        children: AdminDashboardController.periods.entries.map((e) {
-          final sel = ctrl.selectedPeriod.value == e.key;
-          return GestureDetector(
-            onTap: () => ctrl.changePeriod(e.key),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-              decoration: BoxDecoration(
-                color: sel ? AppTheme.yellow : Colors.white.op(0.18),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(e.value,
-                  style: TextStyle(
-                      fontFamily: AppTheme.fontFamily,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: sel ? AppTheme.darkBlue : Colors.white)),
-            ),
-          );
-        }).toList(),
-      ),
-    ));
-  }
-}
 
 class _ChartPeriodSelector extends StatelessWidget {
   final AdminDashboardController ctrl;
@@ -1465,37 +1158,13 @@ class _ChartPeriodSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Obx(() => Container(
-      height: 32,
-      decoration: BoxDecoration(
-        color: AppTheme.greyLight.op(0.6),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: AdminDashboardController.chartPeriods.entries.map((e) {
-          final sel = ctrl.chartPeriod.value == e.key;
-          return GestureDetector(
-            onTap: () => ctrl.setChartPeriod(e.key),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: sel ? AppTheme.primaryGreen : Colors.transparent,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(e.value,
-                  style: TextStyle(
-                    fontFamily: AppTheme.fontFamily,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: sel ? Colors.white : AppTheme.greyMedium,
-                  )),
-            ),
-          );
-        }).toList(),
-      ),
-    ));
+    final keys = AdminDashboardController.chartPeriods.keys.toList();
+    final labels = AdminDashboardController.chartPeriods.values.toList();
+    return Obx(() => NeoTabs(
+          labels: labels,
+          index: keys.indexOf(ctrl.chartPeriod.value).clamp(0, keys.length - 1).toInt(),
+          onChanged: (i) => ctrl.setChartPeriod(keys[i]),
+        ));
   }
 }
 
@@ -1509,93 +1178,58 @@ class _CategoryFilterChip extends StatelessWidget {
       final cats = ctrl.allCategories;
       if (cats.isEmpty) return const SizedBox.shrink();
       final sel = ctrl.selectedCategory.value;
-
-      return GestureDetector(
+      return NeoPressable(
         onTap: () {
           Get.bottomSheet(
             Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius:
-                BorderRadius.vertical(top: Radius.circular(AppTheme.radiusXl)),
+              decoration: BoxDecoration(
+                color: Neo.surface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                boxShadow: [BoxShadow(color: Neo.shadow.withOpacity(0.5), blurRadius: 24)],
               ),
               child: SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.all(20),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Filtrer par catégorie', style: AppTheme.h2),
-                      const SizedBox(height: 14),
-                      Wrap(spacing: 8, runSpacing: 8, children: [
-                        _CatPill('Toutes', '', ctrl),
-                        ...cats.map((c) => _CatPill(c, c, ctrl)),
-                      ]),
-                      const SizedBox(height: 20),
-                    ],
-                  ),
+                  child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Filtrer par catégorie', style: Neo.t(17, w: FontWeight.w700)),
+                    const SizedBox(height: 14),
+                    Obx(() => Wrap(spacing: 10, runSpacing: 10, children: [
+                          _catChip('Toutes', '', ctrl),
+                          ...cats.map((c) => _catChip(c, c, ctrl)),
+                        ])),
+                    const SizedBox(height: 16),
+                  ]),
                 ),
               ),
             ),
           );
         },
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: sel.isEmpty ? AppTheme.greyLight.op(0.6) : AppTheme.primaryGreen.op(0.1),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: sel.isEmpty ? AppTheme.greyLight : AppTheme.primaryGreen.op(0.4),
-            ),
+            color: sel.isEmpty ? Neo.surface : Neo.blue.op(0.10),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: sel.isEmpty ? Colors.white : Neo.blue.op(0.4)),
+            boxShadow: Neo.softRelief(),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.filter_list_rounded,
-                size: 14,
-                color: sel.isEmpty ? AppTheme.greyMedium : AppTheme.primaryGreen),
-            const SizedBox(width: 4),
-            Text(sel.isEmpty ? 'Catégorie' : sel,
-                style: TextStyle(
-                  fontFamily: AppTheme.fontFamily,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: sel.isEmpty ? AppTheme.greyMedium : AppTheme.primaryGreen,
-                )),
+            Icon(Icons.filter_list_rounded, size: 16, color: sel.isEmpty ? Neo.muted : Neo.blue),
+            const SizedBox(width: 5),
+            Text(sel.isEmpty ? 'Catégorie' : sel, style: Neo.t(11.5, w: FontWeight.w600, c: sel.isEmpty ? Neo.muted : Neo.blue)),
           ]),
         ),
       );
     });
   }
-}
 
-class _CatPill extends StatelessWidget {
-  final String label, value;
-  final AdminDashboardController ctrl;
-  const _CatPill(this.label, this.value, this.ctrl);
-
-  @override
-  Widget build(BuildContext context) {
-    final sel = ctrl.selectedCategory.value == value;
-    return GestureDetector(
-      onTap: () {
-        ctrl.setSelectedCategory(value);
-        Get.back();
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-        decoration: BoxDecoration(
-          color: sel ? AppTheme.primaryGreen : AppTheme.greyLight.op(0.5),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(label,
-            style: TextStyle(
-                fontFamily: AppTheme.fontFamily,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: sel ? Colors.white : AppTheme.darkBlue)),
-      ),
-    );
-  }
+  static Widget _catChip(String label, String value, AdminDashboardController ctrl) => NeoChip(
+        label: label,
+        selected: ctrl.selectedCategory.value == value,
+        onTap: () {
+          ctrl.setSelectedCategory(value);
+          Get.back();
+        },
+      );
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1609,11 +1243,11 @@ class _RFilter {
 }
 
 const List<_RFilter> _routingFilters = [
-  _RFilter('pending', 'En attente', AppTheme.warning),
-  _RFilter('routed', 'Routés', AppTheme.info),
-  _RFilter('in_progress', 'En cours', AppTheme.purple),
-  _RFilter('resolved', 'Résolus', AppTheme.success),
-  _RFilter('all', 'Tous', AppTheme.greyMedium),
+  _RFilter('pending', 'En attente', Neo.warning),
+  _RFilter('routed', 'Routés', Neo.info),
+  _RFilter('in_progress', 'En cours', Neo.purple),
+  _RFilter('resolved', 'Résolus', Neo.success),
+  _RFilter('all', 'Tous', Neo.blue),
 ];
 
 class _AdminRoutingPage extends StatelessWidget {
@@ -1623,39 +1257,28 @@ class _AdminRoutingPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final ctrl = Get.find<AdminDashboardController>();
     return Column(children: [
-      SectionHeader(
-        title: 'Gestion des Signalements',
-        height: 78,
-        leading: const Icon(Icons.assignment_outlined, color: Colors.white, size: 22),
-        trailing: IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white70),
-            onPressed: ctrl.loadReports,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints()),
+      NeoTitleBar(
+        title: 'Gestion des signalements',
+        subtitle: 'Routez chaque alerte vers la bonne autorité',
+        actions: [NeoIconButton(icon: Icons.refresh_rounded, onTap: ctrl.loadReports)],
       ),
+      const SizedBox(height: 8),
       _FilterBar(filters: _routingFilters, ctrl: ctrl),
       Expanded(
         child: Obx(() {
-          if (ctrl.isLoadingReports.value) {
-            return const Center(
-                child: CircularProgressIndicator(color: AppTheme.primaryGreen));
-          }
+          if (ctrl.isLoadingReports.value) return const NeoLoading();
           final list = ctrl.filteredReports;
           if (list.isEmpty) return _EmptyRoutingState(filter: ctrl.routingFilter.value);
           final auths = ctrl.authorities.toList();
           final loadingAuth = ctrl.isLoadingAuth.value;
           return RefreshIndicator(
             onRefresh: ctrl.loadReports,
-            color: AppTheme.primaryGreen,
+            color: Neo.blue,
             child: ListView.builder(
-              padding: const EdgeInsets.all(16),
+              physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
               itemCount: list.length,
-              itemBuilder: (_, i) => _RoutingCard(
-                report: list[i],
-                ctrl: ctrl,
-                authorities: auths,
-                isLoadingAuth: loadingAuth,
-              ),
+              itemBuilder: (_, i) => _RoutingCard(report: list[i], ctrl: ctrl, authorities: auths, isLoadingAuth: loadingAuth),
             ),
           );
         }),
@@ -1671,30 +1294,24 @@ class _MairieSupervisionPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final ctrl = Get.find<AdminDashboardController>();
     return Column(children: [
-      SectionHeader(
-        title: 'Suivi des Signalements',
-        height: 78,
-        leading: const Icon(Icons.visibility, color: Colors.white, size: 22),
-        trailing: IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white70),
-            onPressed: ctrl.loadReports,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints()),
+      NeoTitleBar(
+        title: 'Suivi des signalements',
+        subtitle: 'Toutes les alertes de votre zone',
+        actions: [NeoIconButton(icon: Icons.refresh_rounded, onTap: ctrl.loadReports)],
       ),
+      const SizedBox(height: 8),
       _FilterBar(filters: _routingFilters, ctrl: ctrl),
       Expanded(
         child: Obx(() {
-          if (ctrl.isLoadingReports.value) {
-            return const Center(
-                child: CircularProgressIndicator(color: AppTheme.primaryGreen));
-          }
+          if (ctrl.isLoadingReports.value) return const NeoLoading();
           final list = ctrl.filteredReports;
           if (list.isEmpty) return _EmptyRoutingState(filter: ctrl.routingFilter.value);
           return RefreshIndicator(
             onRefresh: ctrl.loadReports,
-            color: AppTheme.primaryGreen,
+            color: Neo.blue,
             child: ListView.builder(
-              padding: const EdgeInsets.all(16),
+              physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
               itemCount: list.length,
               itemBuilder: (_, i) => _ReportMiniCard(report: list[i]),
             ),
@@ -1718,56 +1335,39 @@ class _MairieNewsTab extends StatelessWidget {
 
     return RefreshIndicator(
       onRefresh: ctrl.loadReports,
-      color: AppTheme.primaryGreen,
+      color: Neo.blue,
       child: CustomScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
+        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
         slivers: [
           SliverToBoxAdapter(
-            child: SectionHeader(
-              title: 'Actualités — Impact en images',
-              height: 78,
-              leading: const Icon(Icons.newspaper, color: Colors.white, size: 22),
-              trailing: IconButton(
-                  icon: const Icon(Icons.refresh, color: Colors.white70),
-                  onPressed: ctrl.loadReports,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints()),
+            child: NeoTitleBar(
+              title: "L'impact, en images",
+              subtitle: 'Les signalements résolus',
+              actions: [NeoIconButton(icon: Icons.refresh_rounded, onTap: ctrl.loadReports)],
             ),
           ),
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: Obx(() => Row(children: [
-                Expanded(
-                    child: StatTile(
-                        value: '${ctrl.totalResolved}',
-                        label: 'Résolus',
-                        color: AppTheme.success,
-                        icon: Icons.check_circle_outline)),
-                const SizedBox(width: 10),
-                Expanded(
-                    child: StatTile(
-                        value: '${ctrl.resolvedThisWeek}',
-                        label: 'Cette semaine',
-                        color: AppTheme.primaryGreen,
-                        icon: Icons.trending_up_rounded)),
-              ])),
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+              child: Obx(() => NeoStatsStrip(items: [
+                    NeoStat('${ctrl.totalResolved}', 'Résolus', Neo.success),
+                    NeoStat('${ctrl.resolvedThisWeek}', 'Cette semaine', Neo.blue),
+                  ])),
             ),
           ),
           Obx(() {
             if (ctrl.isLoadingReports.value && ctrl.reports.isEmpty) {
-              return const SliverFillRemaining(
-                  child: Center(
-                      child: CircularProgressIndicator(color: AppTheme.primaryGreen)));
+              return const SliverFillRemaining(hasScrollBody: false, child: Padding(padding: EdgeInsets.only(top: 60), child: NeoLoading()));
             }
             final grouped = ctrl.groupedNews;
             if (grouped.isEmpty) {
-              return const SliverFillRemaining(
-                  child: _EmptyState(
-                    icon: Icons.photo_library_outlined,
-                    message:
-                    "Pas encore de succès à afficher.\nDès qu'un signalement sera résolu, il apparaîtra ici.",
-                  ));
+              return const SliverToBoxAdapter(
+                child: NeoEmpty(
+                  icon: Icons.photo_library_outlined,
+                  title: 'Pas encore de succès',
+                  message: "Dès qu'un signalement sera résolu, il apparaîtra ici.",
+                ),
+              );
             }
             final myRegion = ctrl.mairieZone.value;
             final zones = grouped.keys.toList()
@@ -1780,27 +1380,24 @@ class _MairieNewsTab extends StatelessWidget {
               });
 
             return SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
               sliver: SliverList(
-                  delegate: SliverChildListDelegate([
-                    for (final zone in zones) ...[
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8, top: 6),
-                        child: Row(children: [
-                          Icon(Icons.location_city_rounded,
-                              size: 15,
-                              color: (myRegion.isNotEmpty && zone.contains(myRegion))
-                                  ? AppTheme.primaryGreen
-                                  : AppTheme.greyMedium),
-                          const SizedBox(width: 6),
-                          Text(zone, style: AppTheme.h3),
-                        ]),
-                      ),
-                      for (final e in grouped[zone]!.entries)
-                        _NewsAuthorityBlock(authority: e.key, items: e.value),
-                      const SizedBox(height: 8),
-                    ],
-                  ])),
+                delegate: SliverChildListDelegate([
+                  for (final zone in zones) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10, top: 6),
+                      child: Row(children: [
+                        Icon(Icons.location_city_rounded,
+                            size: 16, color: (myRegion.isNotEmpty && zone.contains(myRegion)) ? Neo.blue : Neo.muted),
+                        const SizedBox(width: 6),
+                        Text(zone, style: Neo.t(15, w: FontWeight.w700)),
+                      ]),
+                    ),
+                    for (final e in grouped[zone]!.entries) _NewsAuthorityBlock(authority: e.key, items: e.value),
+                    const SizedBox(height: 8),
+                  ],
+                ]),
+              ),
             );
           }),
         ],
@@ -1817,17 +1414,12 @@ class _NewsAuthorityBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 14, left: 4),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          const Icon(Icons.account_balance_outlined, size: 12, color: AppTheme.greyMedium),
+          const Icon(Icons.account_balance_outlined, size: 12, color: Neo.muted),
           const SizedBox(width: 5),
-          Text(authority,
-              style: const TextStyle(
-                  fontFamily: AppTheme.fontFamily,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.greyMedium)),
+          Text(authority, style: Neo.t(11, w: FontWeight.w700, c: Neo.muted)),
         ]),
         const SizedBox(height: 8),
         ...items.map((item) => _NewsCard(item: item)),
@@ -1843,41 +1435,19 @@ class _NewsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final photo = item.hasAfterPhoto ? item.afterPhotoUrl : item.beforePhotoUrl;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-          boxShadow: AppTheme.cardShadow()),
-      child: Row(children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: photo.isNotEmpty
-              ? Image.network(photo,
-              width: 54,
-              height: 54,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) =>
-                  Container(width: 54, height: 54, color: AppTheme.greyLight))
-              : Container(
-              width: 54,
-              height: 54,
-              color: AppTheme.greyLight,
-              child: const Icon(Icons.image_outlined,
-                  color: AppTheme.greyMedium, size: 20)),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(item.title, style: AppTheme.h3, maxLines: 1, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 3),
-              Text('${item.communeName} · ${item.category}',
-                  style: AppTheme.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
-            ])),
-        const SizedBox(width: 8),
-        const StatusPill(label: 'Résolu', color: AppTheme.success),
-      ]),
+    final thumb = ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: photo.isNotEmpty
+          ? Image.network(photo, width: 54, height: 54, fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(width: 54, height: 54, color: Neo.inset))
+          : Container(width: 54, height: 54, color: Neo.inset, child: const Icon(Icons.image_outlined, color: Neo.muted, size: 20)),
+    );
+    return NeoListCard(
+      icon: Icons.image_outlined,
+      leading: thumb,
+      title: item.title,
+      subtitle: '${item.communeName} · ${item.category}',
+      pill: const NeoPill(label: 'Résolu', color: Neo.success),
     );
   }
 }
@@ -1893,23 +1463,23 @@ class _AdminAgentsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final ctrl = Get.find<AdminDashboardController>();
     return Column(children: [
-      const SectionHeader(title: 'Performance Agents', height: 78),
-      Expanded(child: Obx(() {
-        final agents = ctrl.agents;
-        if (ctrl.isLoading && agents.isEmpty) {
-          return const Center(
-              child: CircularProgressIndicator(color: AppTheme.primaryGreen));
-        }
-        if (agents.isEmpty) {
-          return const _EmptyState(
-              icon: Icons.support_agent, message: 'Aucun agent enregistré');
-        }
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: agents.length,
-          itemBuilder: (_, i) => _AgentCard(agent: agents[i], rank: i + 1),
-        );
-      })),
+      const NeoTitleBar(title: 'Performance agents', subtitle: 'Classement par taux de résolution'),
+      const SizedBox(height: 10),
+      Expanded(
+        child: Obx(() {
+          final agents = ctrl.agents;
+          if (ctrl.isLoading && agents.isEmpty) return const NeoLoading();
+          if (agents.isEmpty) {
+            return const NeoEmpty(icon: Icons.support_agent, title: 'Aucun agent', message: 'Aucun agent enregistré pour le moment.');
+          }
+          return ListView.builder(
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+            itemCount: agents.length,
+            itemBuilder: (_, i) => NeoReveal(delayMs: (i % 8) * 40, child: _AgentCard(agent: agents[i], rank: i + 1)),
+          );
+        }),
+      ),
     ]);
   }
 }
@@ -1922,54 +1492,34 @@ class _AgentPodium extends StatelessWidget {
   Widget build(BuildContext context) {
     final top = agents.take(5).toList();
     const medals = ['🥇', '🥈', '🥉'];
-    return Container(
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-          boxShadow: AppTheme.cardShadow()),
-      child: Column(
-        children: top.asMap().entries.map((e) {
-          final i = e.key;
-          final a = e.value;
-          final isLast = i == top.length - 1;
-          final rc = a.resolutionRate >= 80
-              ? AppTheme.success
-              : a.resolutionRate >= 50
-              ? AppTheme.warning
-              : AppTheme.coral;
-          return Column(children: [
-            ListTile(
-              leading: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                      color: i == 0
-                          ? AppTheme.yellow.op(0.15)
-                          : AppTheme.greyLight.op(0.5),
-                      shape: BoxShape.circle),
-                  child: Center(
-                      child: Text(i < 3 ? medals[i] : '${i + 1}',
-                          style: TextStyle(fontSize: i < 3 ? 14 : 11)))),
-              title: Text(a.name, style: AppTheme.h3),
-              subtitle: Text('${a.totalAssigned} ass. · ${a.totalResolved} rés.',
-                  style: AppTheme.caption),
-              trailing: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                    color: rc.op(0.1), borderRadius: BorderRadius.circular(8)),
-                child: Text('${a.resolutionRate.round()}%',
-                    style: TextStyle(
-                        fontFamily: AppTheme.fontFamily,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: rc)),
+    return NeoGroup(
+      children: top.asMap().entries.map((e) {
+        final i = e.key;
+        final a = e.value;
+        final rc = a.resolutionRate >= 80 ? Neo.success : a.resolutionRate >= 50 ? Neo.warning : Neo.danger;
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: i == 0 ? Neo.warning.op(0.15) : Neo.inset,
+                shape: BoxShape.circle,
               ),
+              child: Center(child: Text(i < 3 ? medals[i] : '${i + 1}', style: TextStyle(fontSize: i < 3 ? 16 : 12))),
             ),
-            if (!isLast)
-              Divider(height: 1, color: AppTheme.greyLight.op(0.7), indent: 52),
-          ]);
-        }).toList(),
-      ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(a.name, style: Neo.t(13.5, w: FontWeight.w600)),
+                Text('${a.totalAssigned} ass. · ${a.totalResolved} rés.', style: Neo.t(11, c: Neo.muted)),
+              ]),
+            ),
+            NeoPill(label: '${a.resolutionRate.round()}%', color: rc),
+          ]),
+        );
+      }).toList(),
     );
   }
 }
@@ -1982,63 +1532,37 @@ class _AgentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rate = agent.resolutionRate;
-    final rc = rate >= 80
-        ? AppTheme.success
-        : rate >= 50
-        ? AppTheme.warning
-        : AppTheme.coral;
+    final rc = rate >= 80 ? Neo.success : rate >= 50 ? Neo.warning : Neo.danger;
     const medals = ['🥇', '🥈', '🥉'];
 
-    return Container(
+    return NeoCard(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        border: rank == 1
-            ? Border.all(color: AppTheme.yellow.op(0.5), width: 1.5)
-            : Border.all(color: AppTheme.greyLight.op(0.8)),
-        boxShadow: AppTheme.cardShadow(),
-      ),
+      borderColor: rank == 1 ? Neo.warning.op(0.6) : null,
       child: Column(children: [
         Row(children: [
           Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-                color: rank <= 3 ? AppTheme.yellow.op(0.1) : AppTheme.greyLight.op(0.5),
-                shape: BoxShape.circle),
-            child: Center(
-                child: Text(rank <= 3 ? medals[rank - 1] : '$rank',
-                    style: TextStyle(
-                        fontSize: rank <= 3 ? 20 : 15, fontWeight: FontWeight.bold))),
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(color: rank <= 3 ? Neo.warning.op(0.12) : Neo.inset, shape: BoxShape.circle),
+            child: Center(child: Text(rank <= 3 ? medals[rank - 1] : '$rank', style: TextStyle(fontSize: rank <= 3 ? 21 : 15, fontWeight: FontWeight.bold))),
           ),
           const SizedBox(width: 12),
           Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(agent.name, style: AppTheme.h3),
-                Text('${agent.totalAssigned} assigné · ${agent.totalResolved} résolu',
-                    style: AppTheme.caption),
-              ])),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration:
-            BoxDecoration(color: rc.op(0.1), borderRadius: BorderRadius.circular(12)),
-            child: Text('${rate.round()}%',
-                style: TextStyle(
-                    fontFamily: AppTheme.fontFamily,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: rc)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(agent.name, style: Neo.t(14, w: FontWeight.w600)),
+              Text('${agent.totalAssigned} assigné · ${agent.totalResolved} résolu', style: Neo.t(11, c: Neo.muted)),
+            ]),
           ),
+          Text('${rate.round()}%', style: Neo.t(18, w: FontWeight.w700, c: rc)),
         ]),
         const SizedBox(height: 12),
         ClipRRect(
           borderRadius: BorderRadius.circular(4),
           child: LinearProgressIndicator(
             value: (rate / 100).clamp(0.0, 1.0).toDouble(),
-            minHeight: 6,
-            backgroundColor: rc.op(0.1),
+            minHeight: 7,
+            backgroundColor: rc.op(0.12),
             valueColor: AlwaysStoppedAnimation<Color>(rc),
           ),
         ),
@@ -2058,19 +1582,21 @@ class _AdminUsersPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final ctrl = Get.find<AdminDashboardController>();
     return Column(children: [
-      const SectionHeader(title: 'Utilisateurs', height: 78),
+      const NeoTitleBar(title: 'Utilisateurs', subtitle: 'Citoyens, agents et administrateurs'),
       Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Obx(() {
-              final ov = ctrl.overview;
-              return Column(children: [
-                _UsersRow(overview: ov),
-                const SizedBox(height: 20),
-                if (ov != null && ov.totalUsers > 0) _UserDonut(overview: ov),
-              ]);
-            }),
-          )),
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+          child: Obx(() {
+            final ov = ctrl.overview;
+            return Column(children: [
+              _UsersRow(overview: ov),
+              const SizedBox(height: 20),
+              if (ov != null && ov.totalUsers > 0) _UserDonut(overview: ov),
+            ]);
+          }),
+        ),
+      ),
     ]);
   }
 }
@@ -2083,57 +1609,42 @@ class _UserDonut extends StatelessWidget {
   Widget build(BuildContext context) {
     final total = overview.totalUsers == 0 ? 1 : overview.totalUsers;
     final items = [
-      _Seg('Citoyens', overview.totalCitizens, AppTheme.primaryGreen),
-      _Seg('Agents', overview.totalAgents, AppTheme.info),
-      _Seg('Admins', total - overview.totalCitizens - overview.totalAgents,
-          AppTheme.purple),
+      _Seg('Citoyens', overview.totalCitizens, Neo.blue),
+      _Seg('Agents', overview.totalAgents, Neo.info),
+      _Seg('Admins', total - overview.totalCitizens - overview.totalAgents, Neo.purple),
     ];
-    return Container(
+    return NeoCard(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-          boxShadow: AppTheme.cardShadow()),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Répartition', style: AppTheme.h3),
+        Text('Répartition', style: Neo.t(14, w: FontWeight.w600)),
         const SizedBox(height: 12),
         SizedBox(
-            height: 130,
-            child: PieChart(PieChartData(
-              sectionsSpace: 2,
-              centerSpaceRadius: 38,
-              sections: items
-                  .where((s) => s.count > 0)
-                  .map((s) => PieChartSectionData(
-                value: s.count.toDouble(),
-                color: s.color,
-                title: '${(s.count / total * 100).round()}%',
-                radius: 30,
-                titleStyle: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white),
-              ))
-                  .toList(),
-            ))),
+          height: 140,
+          child: PieChart(PieChartData(
+            sectionsSpace: 3,
+            centerSpaceRadius: 38,
+            sections: items
+                .where((s) => s.count > 0)
+                .map((s) => PieChartSectionData(
+                      value: s.count.toDouble(),
+                      color: s.color,
+                      title: '${(s.count / total * 100).round()}%',
+                      radius: 30,
+                      titleStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                    ))
+                .toList(),
+          )),
+        ),
         const SizedBox(height: 12),
         ...items.map((s) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 3),
-          child: Row(children: [
-            Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(color: s.color, shape: BoxShape.circle)),
-            const SizedBox(width: 8),
-            Expanded(child: Text(s.label, style: AppTheme.body)),
-            Text('${s.count}',
-                style: TextStyle(
-                    fontFamily: AppTheme.fontFamily,
-                    fontWeight: FontWeight.bold,
-                    color: s.color,
-                    fontSize: 12)),
-          ]),
-        )),
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(children: [
+                Container(width: 9, height: 9, decoration: BoxDecoration(color: s.color, shape: BoxShape.circle)),
+                const SizedBox(width: 8),
+                Expanded(child: Text(s.label, style: Neo.t(12.5))),
+                Text('${s.count}', style: Neo.t(12, w: FontWeight.w700, c: s.color)),
+              ]),
+            )),
       ]),
     );
   }
@@ -2147,7 +1658,7 @@ class _Seg {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-//  PARAMÈTRES
+//  PARAMÈTRES / PROFIL
 // ════════════════════════════════════════════════════════════════════════════
 
 class _AdminSettingsPage extends StatelessWidget {
@@ -2157,167 +1668,71 @@ class _AdminSettingsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = AuthService.instance;
     final ctrl = Get.find<AdminDashboardController>();
-    final topInset = MediaQuery.of(context).padding.top;
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: SingleChildScrollView(
-        child: Column(children: [
-          SizedBox(
-            height: 224 + topInset,
-            child: Stack(children: [
-              ClipRRect(
-                borderRadius: const BorderRadius.only(
-                    bottomLeft: Radius.circular(AppTheme.radiusXl),
-                    bottomRight: Radius.circular(AppTheme.radiusXl)),
-                child: SizedBox.expand(
-                    child: Container(
-                        decoration: const BoxDecoration(gradient: AppTheme.heroGradient),
-                        child: const SenegalPatternBackground())),
-              ),
-              const Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.only(
-                      bottomLeft: Radius.circular(AppTheme.radiusXl),
-                      bottomRight: Radius.circular(AppTheme.radiusXl)),
-                  child: FlagStripe(),
+    return ListView(
+      physics: const BouncingScrollPhysics(),
+      padding: EdgeInsets.fromLTRB(20, MediaQuery.of(context).padding.top + 20, 20, 28),
+      children: [
+        NeoReveal(
+          child: Obx(() {
+            final mairie = ctrl.isMairie.value;
+            final roleLabel = mairie ? 'Mairie' : 'Administrateur système';
+            final displayName = mairie
+                ? _str(ctrl.mairieName.value, _str(auth.userName.value, 'Mairie'))
+                : _str(auth.userName.value, 'Administrateur');
+            return Column(children: [
+              Container(
+                width: 104,
+                height: 104,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Neo.surface,
+                  border: Border.all(color: Colors.white, width: 4),
+                  boxShadow: Neo.relief(),
                 ),
+                child: Icon(mairie ? Icons.account_balance : Icons.admin_panel_settings, size: 48, color: Neo.blue),
               ),
-              Positioned.fill(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(20, topInset + 16, 20, 28),
-                  child: Obx(() {
-                    final isMairie = ctrl.isMairie.value;
-                    final roleLabel = isMairie ? 'Mairie' : 'Administrateur Système';
-                    final iconData =
-                    isMairie ? Icons.account_balance : Icons.admin_panel_settings;
-                    final displayName = isMairie
-                        ? _str(ctrl.mairieName.value, _str(auth.userName.value, 'Mairie'))
-                        : _str(auth.userName.value, 'Administrateur');
-                    return Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Container(
-                            width: 80,
-                            height: 80,
-                            decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.white.op(0.15),
-                                border: Border.all(
-                                    color: AppTheme.yellow.op(0.6), width: 2.5)),
-                            child: Icon(iconData, color: Colors.white, size: 38),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(displayName,
-                              style: const TextStyle(
-                                  fontFamily: AppTheme.fontFamily,
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 8),
-                          Container(
-                            padding:
-                            const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-                            decoration: BoxDecoration(
-                                color: AppTheme.yellow.op(0.2),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(color: AppTheme.yellow.op(0.4))),
-                            child: Text(roleLabel,
-                                style: const TextStyle(
-                                    fontFamily: AppTheme.fontFamily,
-                                    color: AppTheme.yellow,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700)),
-                          ),
-                        ]);
-                  }),
-                ),
-              ),
-            ]),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(children: [
-              _SettingsSection(title: 'MON COMPTE', items: [
-                _SettingsItem(
-                    icon: Icons.email_outlined,
-                    label: 'Email',
-                    trailing: Obx(() =>
-                        Text(_str(auth.userEmail.value), style: AppTheme.caption))),
-                _SettingsItem(
-                    icon: Icons.shield_outlined,
-                    label: 'Rôle',
-                    trailing: Obx(() => Text(
-                        ctrl.isMairie.value ? 'Mairie' : 'Administrateur Système',
-                        style: AppTheme.caption))),
-              ]),
-              const SizedBox(height: 12),
-              _SettingsSection(title: 'SÉCURITÉ', items: [
-                _SettingsItem(
-                    icon: Icons.lock_outline,
-                    label: 'Changer le mot de passe',
-                    isAction: true,
-                    onTap: () {}),
-                _SettingsItem(
-                    icon: Icons.notifications_outlined,
-                    label: 'Notifications',
-                    isAction: true,
-                    onTap: () => Get.to(() => const MairieNotificationsScreen())),
-              ]),
-              const SizedBox(height: 20),
-              GestureDetector(
-                onTap: () async {
-                  final ok = await Get.dialog<bool>(AlertDialog(
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppTheme.radiusLg)),
-                    title: const Text('Déconnexion', style: AppTheme.h3),
-                    content: const Text('Voulez-vous vraiment vous déconnecter ?',
-                        style: AppTheme.body),
-                    actions: [
-                      TextButton(
-                          onPressed: () => Get.back(result: false),
-                          child: const Text('Annuler')),
-                      ElevatedButton(
-                          onPressed: () => Get.back(result: true),
-                          style: ElevatedButton.styleFrom(
-                              backgroundColor: AppTheme.coral,
-                              foregroundColor: Colors.white),
-                          child: const Text('Déconnecter')),
-                    ],
-                  ));
-                  if (ok == true) {
-                    await AuthService.instance.logout();
-                    Get.offAllNamed(Routes.SPLASH);
-                  }
-                },
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  decoration: BoxDecoration(
-                    color: AppTheme.coral.op(0.08),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppTheme.coral.op(0.4), width: 1.5),
-                  ),
-                  child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    Icon(Icons.logout_rounded, color: AppTheme.coral, size: 20),
-                    SizedBox(width: 8),
-                    Text('Se déconnecter',
-                        style: TextStyle(
-                            fontFamily: AppTheme.fontFamily,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.coral)),
-                  ]),
-                ),
-              ),
-              const SizedBox(height: 40),
-            ]),
-          ),
-        ]),
-      ),
+              const SizedBox(height: 14),
+              Text(displayName, textAlign: TextAlign.center, style: Neo.t(21, w: FontWeight.w700)),
+              const SizedBox(height: 8),
+              NeoPill(label: roleLabel, color: Neo.blue),
+            ]);
+          }),
+        ),
+        const SizedBox(height: 24),
+        NeoReveal(
+          delayMs: 80,
+          child: NeoGroup(title: 'MON COMPTE', children: [
+            NeoRow(icon: Icons.email_outlined, label: 'Email', value: _str(auth.userEmail.value)),
+            NeoRow(
+              icon: Icons.shield_outlined,
+              label: 'Rôle',
+              value: ctrl.isMairie.value ? 'Mairie' : 'Administrateur système',
+            ),
+          ]),
+        ),
+        const SizedBox(height: 16),
+        NeoReveal(
+          delayMs: 120,
+          child: NeoGroup(title: 'SÉCURITÉ', children: [
+            NeoRow(icon: Icons.lock_outline_rounded, label: 'Changer le mot de passe', onTap: () {}),
+            NeoRow(
+              icon: Icons.notifications_none_rounded,
+              label: 'Notifications',
+              onTap: () => Get.to(() => const MairieNotificationsScreen()),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 24),
+        NeoLogoutButton(onTap: () async {
+          final ok = await neoConfirm(context,
+              title: 'Déconnexion', message: 'Voulez-vous vraiment vous déconnecter ?', confirm: 'Déconnecter');
+          if (ok) {
+            await AuthService.instance.logout();
+            Get.offAllNamed(Routes.SPLASH);
+          }
+        }),
+      ],
     );
   }
 }
@@ -2390,81 +1805,54 @@ class MairieNotificationsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final ctrl = Get.put(MairieNotificationsController());
     return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: Column(children: [
-        SectionHeader(
-          title: 'Notifications',
-          height: 78,
-          leading: const Icon(Icons.notifications, color: Colors.white, size: 22),
-          trailing: IconButton(
-              icon: const Icon(Icons.done_all_rounded, color: Colors.white70),
-              onPressed: ctrl.markAllAsRead),
-        ),
-        Expanded(child: Obx(() {
-          if (ctrl.isLoading.value) {
-            return const Center(
-                child: CircularProgressIndicator(color: AppTheme.primaryGreen));
-          }
-          if (ctrl.items.isEmpty) {
-            return const _EmptyState(
-                icon: Icons.notifications_none_rounded,
-                message: 'Aucune notification pour le moment');
-          }
-          return RefreshIndicator(
-            onRefresh: ctrl.load,
-            color: AppTheme.primaryGreen,
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: ctrl.items.length,
-              itemBuilder: (_, i) {
-                final n = ctrl.items[i];
-                final isRead = n['read_at'] != null;
-                final title = _str(n['title'], 'Notification');
-                final body = _str(n['body'] ?? n['message']);
-                final id = _asInt(n['id']);
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  decoration: BoxDecoration(
-                    color: isRead ? Colors.white : AppTheme.primaryGreen.op(0.06),
-                    borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-                    border: Border.all(
-                        color: isRead
-                            ? AppTheme.greyLight.op(0.7)
-                            : AppTheme.primaryGreen.op(0.3)),
-                    boxShadow: AppTheme.cardShadow(),
-                  ),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-                    onTap: id == null ? null : () => ctrl.markAsRead(id),
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        if (!isRead)
-                          Container(
-                              width: 8,
-                              height: 8,
-                              margin: const EdgeInsets.only(top: 5, right: 8),
-                              decoration: const BoxDecoration(
-                                  color: AppTheme.primaryGreen, shape: BoxShape.circle)),
-                        Expanded(
-                            child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(title, style: AppTheme.h3),
-                                  if (body.isNotEmpty) ...[
-                                    const SizedBox(height: 3),
-                                    Text(body, style: AppTheme.caption)
-                                  ],
-                                ])),
-                      ]),
-                    ),
-                  ),
+      backgroundColor: Neo.bg,
+      body: NeoBackdrop(
+        child: Column(children: [
+          NeoTitleBar(
+            title: 'Notifications',
+            subtitle: 'Vos dernières alertes',
+            leading: NeoIconButton(icon: Icons.arrow_back_ios_new_rounded, onTap: () => Get.back()),
+            actions: [NeoIconButton(icon: Icons.done_all_rounded, onTap: ctrl.markAllAsRead)],
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: Obx(() {
+              if (ctrl.isLoading.value) return const NeoLoading();
+              if (ctrl.items.isEmpty) {
+                return const NeoEmpty(
+                  icon: Icons.notifications_none_rounded,
+                  title: 'Aucune notification',
+                  message: 'Vous serez prévenu ici dès qu\'il y a du nouveau.',
                 );
-              },
-            ),
-          );
-        })),
-      ]),
+              }
+              return RefreshIndicator(
+                onRefresh: ctrl.load,
+                color: Neo.blue,
+                child: ListView.builder(
+                  physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+                  itemCount: ctrl.items.length,
+                  itemBuilder: (_, i) {
+                    final n = ctrl.items[i];
+                    final isRead = n['read_at'] != null;
+                    final title = _str(n['title'], 'Notification');
+                    final body = _str(n['body'] ?? n['message']);
+                    final id = _asInt(n['id']);
+                    return NeoListCard(
+                      icon: isRead ? Icons.notifications_none_rounded : Icons.notifications_active_rounded,
+                      color: isRead ? Neo.muted : Neo.blue,
+                      title: title,
+                      subtitle: body.isEmpty ? null : body,
+                      onTap: id == null ? null : () => ctrl.markAsRead(id),
+                      pill: isRead ? null : const NeoPill(label: 'Nouveau', color: Neo.blue),
+                    );
+                  },
+                ),
+              );
+            }),
+          ),
+        ]),
+      ),
     );
   }
 }
@@ -2473,119 +1861,23 @@ class MairieNotificationsScreen extends StatelessWidget {
 //  WIDGETS PARTAGÉS
 // ════════════════════════════════════════════════════════════════════════════
 
-class _DashSectionTitle extends StatelessWidget {
-  final String title;
-  final IconData icon;
-  const _DashSectionTitle({required this.title, required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(children: [
-      Icon(icon, size: 17, color: AppTheme.primaryGreen),
-      const SizedBox(width: 7),
-      Text(title, style: AppTheme.h2),
-    ]);
-  }
-}
-
-class _KpiItem {
-  final String value, label;
-  final IconData icon;
-  final Color color;
-  const _KpiItem(this.value, this.label, this.icon, this.color);
-}
-
-class _KpiRow extends StatelessWidget {
-  final List<_KpiItem> items;
-  const _KpiRow({required this.items});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: AppTheme.ctaGradient,
-        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        boxShadow: AppTheme.elevatedShadow(AppTheme.primaryGreen),
-      ),
-      child: Row(
-        children: items.asMap().entries.map((e) {
-          final isLast = e.key == items.length - 1;
-          final item = e.value;
-          return Expanded(
-              child: Row(children: [
-                Expanded(
-                    child: Column(children: [
-                      Icon(item.icon, color: item.color, size: 18),
-                      const SizedBox(height: 5),
-                      Text(item.value,
-                          style: TextStyle(
-                              fontFamily: AppTheme.fontFamily,
-                              color: item.color,
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold)),
-                      Text(item.label,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              fontFamily: AppTheme.fontFamily,
-                              color: Colors.white70,
-                              fontSize: 9,
-                              height: 1.3)),
-                    ])),
-                if (!isLast)
-                  Container(
-                      width: 1,
-                      height: 40,
-                      color: Colors.white.op(0.25),
-                      margin: const EdgeInsets.symmetric(horizontal: 4)),
-              ]));
-        }).toList(),
-      ),
-    );
-  }
-}
-
 class _MairieStatsGrid extends StatelessWidget {
   final int total, pending, routed, resolved;
-  const _MairieStatsGrid(
-      {required this.total,
-        required this.pending,
-        required this.routed,
-        required this.resolved});
+  const _MairieStatsGrid({required this.total, required this.pending, required this.routed, required this.resolved});
 
   @override
   Widget build(BuildContext context) {
     return Column(children: [
       Row(children: [
-        Expanded(
-            child: StatTile(
-                label: 'Total reçus',
-                value: '$total',
-                icon: Icons.assignment_outlined,
-                color: AppTheme.primaryGreen)),
+        Expanded(child: NeoStatTile(label: 'Total reçus', value: '$total', icon: Icons.assignment_outlined, color: Neo.blue)),
         const SizedBox(width: 12),
-        Expanded(
-            child: StatTile(
-                label: 'En attente',
-                value: '$pending',
-                icon: Icons.pending_outlined,
-                color: AppTheme.warning)),
+        Expanded(child: NeoStatTile(label: 'En attente', value: '$pending', icon: Icons.pending_outlined, color: Neo.warning)),
       ]),
       const SizedBox(height: 12),
       Row(children: [
-        Expanded(
-            child: StatTile(
-                label: 'Routés',
-                value: '$routed',
-                icon: Icons.route_outlined,
-                color: AppTheme.info)),
+        Expanded(child: NeoStatTile(label: 'Routés', value: '$routed', icon: Icons.route_outlined, color: Neo.info)),
         const SizedBox(width: 12),
-        Expanded(
-            child: StatTile(
-                label: 'Résolus',
-                value: '$resolved',
-                icon: Icons.check_circle_outline,
-                color: AppTheme.success)),
+        Expanded(child: NeoStatTile(label: 'Résolus', value: '$resolved', icon: Icons.check_circle_outline, color: Neo.success)),
       ]),
     ]);
   }
@@ -2599,26 +1891,11 @@ class _UsersRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final o = overview;
     return Row(children: [
-      Expanded(
-          child: StatTile(
-              label: 'Total',
-              value: '${o?.totalUsers ?? 0}',
-              icon: Icons.people_outline,
-              color: AppTheme.darkBlue)),
+      Expanded(child: NeoStatTile(label: 'Total', value: '${o?.totalUsers ?? 0}', icon: Icons.people_outline, color: Neo.ink)),
       const SizedBox(width: 10),
-      Expanded(
-          child: StatTile(
-              label: 'Citoyens',
-              value: '${o?.totalCitizens ?? 0}',
-              icon: Icons.person_outline,
-              color: AppTheme.primaryGreen)),
+      Expanded(child: NeoStatTile(label: 'Citoyens', value: '${o?.totalCitizens ?? 0}', icon: Icons.person_outline, color: Neo.blue)),
       const SizedBox(width: 10),
-      Expanded(
-          child: StatTile(
-              label: 'Agents',
-              value: '${o?.totalAgents ?? 0}',
-              icon: Icons.support_agent_outlined,
-              color: AppTheme.info)),
+      Expanded(child: NeoStatTile(label: 'Agents', value: '${o?.totalAgents ?? 0}', icon: Icons.support_agent_outlined, color: Neo.info)),
     ]);
   }
 }
@@ -2635,76 +1912,53 @@ class _StatusBreakdownCard extends StatelessWidget {
     final routed = _asInt(byStatus?.routed) ?? localCounts['routed'] ?? 0;
     final inProgress = _asInt(byStatus?.inProgress) ?? localCounts['in_progress'] ?? 0;
     final resolved = _asInt(byStatus?.resolved) ?? localCounts['resolved'] ?? 0;
-    final total =
-        _asInt(byStatus?.total) ?? (pending + routed + inProgress + resolved);
+    final total = _asInt(byStatus?.total) ?? (pending + routed + inProgress + resolved);
     final safeTotal = total == 0 ? 1 : total;
 
     final items = [
-      _StatusSegment('En attente', pending, AppTheme.warning),
-      _StatusSegment('Routés', routed, AppTheme.info),
-      _StatusSegment('En cours', inProgress, AppTheme.purple),
-      _StatusSegment('Résolus', resolved, AppTheme.success),
+      _StatusSegment('En attente', pending, Neo.warning),
+      _StatusSegment('Routés', routed, Neo.info),
+      _StatusSegment('En cours', inProgress, Neo.purple),
+      _StatusSegment('Résolus', resolved, Neo.success),
     ];
 
-    return Container(
+    return NeoCard(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-          boxShadow: AppTheme.cardShadow()),
       child: Column(children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          const Text('Répartition', style: AppTheme.h3),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-                color: AppTheme.primaryGreen.op(0.08),
-                borderRadius: BorderRadius.circular(10)),
-            child: Text('$total total',
-                style: const TextStyle(
-                    fontFamily: AppTheme.fontFamily,
-                    color: AppTheme.primaryGreen,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 11)),
-          ),
+          Text('Répartition', style: Neo.t(14, w: FontWeight.w600)),
+          NeoPill(label: '$total total', color: Neo.blue),
         ]),
         const SizedBox(height: 12),
         ClipRRect(
-          borderRadius: BorderRadius.circular(5),
+          borderRadius: BorderRadius.circular(6),
           child: SizedBox(
-              height: 10,
-              child: Row(
-                children: items
-                    .map((item) => Expanded(
-                    flex: item.count > 0 ? item.count : 1,
-                    child: Container(
-                        color: item.count > 0 ? item.color : AppTheme.greyLight)))
-                    .toList(),
-              )),
+            height: 10,
+            child: Row(
+              children: items
+                  .map((item) => Expanded(
+                        flex: item.count > 0 ? item.count : 1,
+                        child: Container(color: item.count > 0 ? item.color : Neo.line),
+                      ))
+                  .toList(),
+            ),
+          ),
         ),
         const SizedBox(height: 14),
         ...items.map((item) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Row(children: [
-            Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(color: item.color, shape: BoxShape.circle)),
-            const SizedBox(width: 8),
-            Expanded(child: Text(item.label, style: AppTheme.body)),
-            Text('${item.count}',
-                style: TextStyle(
-                    fontFamily: AppTheme.fontFamily,
-                    fontWeight: FontWeight.bold,
-                    color: item.color,
-                    fontSize: 12)),
-            const SizedBox(width: 8),
-            SizedBox(
-                width: 36,
-                child: Text('${((item.count / safeTotal) * 100).round()}%',
-                    style: AppTheme.caption, textAlign: TextAlign.right)),
-          ]),
-        )),
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(children: [
+                Container(width: 9, height: 9, decoration: BoxDecoration(color: item.color, shape: BoxShape.circle)),
+                const SizedBox(width: 8),
+                Expanded(child: Text(item.label, style: Neo.t(12.5))),
+                Text('${item.count}', style: Neo.t(12, w: FontWeight.w700, c: item.color)),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 36,
+                  child: Text('${((item.count / safeTotal) * 100).round()}%', textAlign: TextAlign.right, style: Neo.t(10.5, c: Neo.muted)),
+                ),
+              ]),
+            )),
       ]),
     );
   }
@@ -2724,11 +1978,11 @@ class _SeverityCards extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(children: [
-      Expanded(child: _SevCard('Faible', low, AppTheme.success, Icons.arrow_downward)),
+      Expanded(child: _SevCard('Faible', low, Neo.success, Icons.arrow_downward)),
       const SizedBox(width: 10),
-      Expanded(child: _SevCard('Moyen', medium, AppTheme.warning, Icons.remove)),
+      Expanded(child: _SevCard('Moyen', medium, Neo.warning, Icons.remove)),
       const SizedBox(width: 10),
-      Expanded(child: _SevCard('Élevé', high, AppTheme.coral, Icons.priority_high)),
+      Expanded(child: _SevCard('Élevé', high, Neo.danger, Icons.priority_high)),
     ]);
   }
 }
@@ -2742,27 +1996,13 @@ class _SevCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        border: Border.all(color: color.op(0.3), width: 1.5),
-        boxShadow: AppTheme.cardShadow(),
-      ),
+    return NeoCard(
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
       child: Column(children: [
-        Container(
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(color: color.op(0.1), shape: BoxShape.circle),
-            child: Icon(icon, color: color, size: 16)),
-        const SizedBox(height: 6),
-        Text('$count',
-            style: TextStyle(
-                fontFamily: AppTheme.fontFamily,
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: color)),
-        Text(label, style: AppTheme.caption),
+        NeoIconBadge(icon: icon, color: color, size: 36),
+        const SizedBox(height: 8),
+        Text('$count', style: Neo.t(20, w: FontWeight.w700, c: color)),
+        Text(label, style: Neo.t(11, c: Neo.muted)),
       ]),
     );
   }
@@ -2778,56 +2018,17 @@ class _FilterBar extends StatelessWidget {
     return Obx(() {
       final active = ctrl.routingFilter.value;
       final totalCount = ctrl.reports.length;
-      return Container(
-        height: 52,
-        color: AppTheme.darkGreen,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemCount: filters.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 6),
-          itemBuilder: (_, i) {
-            final f = filters[i];
-            final sel = active == f.key;
-            final count = f.key == 'all' ? totalCount : ctrl.countByStatus(f.key);
-
-            return GestureDetector(
-              onTap: () => ctrl.routingFilter.value = f.key,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                decoration: BoxDecoration(
-                  color: sel ? Colors.white : Colors.white.op(0.18),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Text(f.label,
-                      style: TextStyle(
-                          fontFamily: AppTheme.fontFamily,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: sel ? AppTheme.darkGreen : Colors.white)),
-                  const SizedBox(width: 5),
-                  Container(
-                    constraints: const BoxConstraints(minWidth: 18),
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                    decoration: BoxDecoration(
-                      color: sel ? f.color.op(0.15) : Colors.white.op(0.25),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text('$count',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            fontFamily: AppTheme.fontFamily,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                            color: sel ? f.color : Colors.white)),
-                  ),
-                ]),
-              ),
-            );
-          },
-        ),
+      return NeoChipRow(
+        chips: filters.map((f) {
+          final count = f.key == 'all' ? totalCount : ctrl.countByStatus(f.key);
+          return NeoChip(
+            label: f.label,
+            color: f.color,
+            count: count,
+            selected: active == f.key,
+            onTap: () => ctrl.routingFilter.value = f.key,
+          );
+        }).toList(),
       );
     });
   }
@@ -2840,68 +2041,21 @@ class _PendingBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return NeoCard(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppTheme.warning.op(0.1),
-          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-          border: Border.all(color: AppTheme.warning.op(0.4), width: 1.5),
+      borderColor: Neo.warning.op(0.5),
+      child: Row(children: [
+        const NeoIconBadge(icon: Icons.pending_actions, color: Neo.warning, size: 46),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('$count signalement${count > 1 ? 's' : ''} en attente', style: Neo.t(14, w: FontWeight.w600)),
+            Text('Toucher pour router', style: Neo.t(11, c: Neo.muted)),
+          ]),
         ),
-        child: Row(children: [
-          Container(
-              padding: const EdgeInsets.all(10),
-              decoration:
-              BoxDecoration(color: AppTheme.warning.op(0.15), shape: BoxShape.circle),
-              child: const Icon(Icons.pending_actions, color: AppTheme.warning, size: 22)),
-          const SizedBox(width: 14),
-          Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('$count signalement${count > 1 ? 's' : ''} en attente',
-                    style: AppTheme.h3),
-                const Text('Toucher pour router', style: AppTheme.caption),
-              ])),
-          const Icon(Icons.arrow_forward_ios, color: AppTheme.warning, size: 14),
-        ]),
-      ),
+        const Icon(Icons.chevron_right_rounded, color: Neo.warning),
+      ]),
     );
-  }
-}
-
-class _NotifBell extends StatelessWidget {
-  final int count;
-  const _NotifBell({required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(clipBehavior: Clip.none, children: [
-      Material(
-        color: Colors.white.op(0.16),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () => Get.to(() => const MairieNotificationsScreen()),
-          child: const Padding(
-              padding: EdgeInsets.all(9),
-              child: Icon(Icons.notifications_outlined, color: Colors.white, size: 20)),
-        ),
-      ),
-      if (count > 0)
-        Positioned(
-            top: -3,
-            right: -3,
-            child: Container(
-              padding: const EdgeInsets.all(3),
-              constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-              decoration:
-              const BoxDecoration(color: AppTheme.coral, shape: BoxShape.circle),
-              child: Center(
-                  child: Text(count > 9 ? '9+' : '$count',
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold))),
-            )),
-    ]);
   }
 }
 
@@ -2916,39 +2070,17 @@ class _ReportMiniCard extends StatelessWidget {
     final title = _str(report['title'], 'Signalement');
     final commune = _str(report['commune_name']);
     final date = _fmtDate(report['created_at']);
-    final statusClr = AdminDashboardController.statusColor(status);
-    final sevClr = AdminDashboardController.severityColor(severity);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-          boxShadow: AppTheme.cardShadow()),
-      child: Row(children: [
-        Container(
-            width: 4,
-            height: 48,
-            decoration:
-            BoxDecoration(color: sevClr, borderRadius: BorderRadius.circular(2))),
-        const SizedBox(width: 12),
-        Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, style: AppTheme.h3, maxLines: 1, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 3),
-              Row(children: [
-                const Icon(Icons.location_on_outlined, size: 11, color: AppTheme.greyMedium),
-                const SizedBox(width: 3),
-                Expanded(
-                    child: Text(commune,
-                        style: AppTheme.caption, maxLines: 1, overflow: TextOverflow.ellipsis)),
-                if (date.isNotEmpty) Text(date, style: AppTheme.caption),
-              ]),
-            ])),
-        const SizedBox(width: 8),
-        StatusPill(label: AdminDashboardController.statusLabel(status), color: statusClr),
-      ]),
+    return NeoListCard(
+      icon: Icons.report_gmailerrorred_rounded,
+      color: AdminDashboardController.severityColor(severity),
+      title: title,
+      subtitle: commune.isEmpty ? null : commune,
+      meta: date.isEmpty ? null : date,
+      pill: NeoPill(
+        label: AdminDashboardController.statusLabel(status),
+        color: AdminDashboardController.statusColor(status),
+      ),
     );
   }
 
@@ -2968,11 +2100,7 @@ class _RoutingCard extends StatelessWidget {
   final AdminDashboardController ctrl;
   final List<Map<String, dynamic>> authorities;
   final bool isLoadingAuth;
-  const _RoutingCard(
-      {required this.report,
-        required this.ctrl,
-        required this.authorities,
-        required this.isLoadingAuth});
+  const _RoutingCard({required this.report, required this.ctrl, required this.authorities, required this.isLoadingAuth});
 
   @override
   Widget build(BuildContext context) {
@@ -2984,271 +2112,143 @@ class _RoutingCard extends StatelessWidget {
     final title = _str(report['title'], 'Sans titre');
     final commune = _str(report['commune_name']);
     final reference = _str(report['reference']);
-    final catName = _categoryName(report['category'], 'Inconnue');
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        border: isPending
-            ? Border.all(color: AppTheme.warning.op(0.5), width: 1.5)
-            : Border.all(color: AppTheme.greyLight.op(0.8)),
-        boxShadow: AppTheme.cardShadow(),
-      ),
+    final catName = _reportCategory(report, 'Inconnue');
+    return NeoCard(
+      margin: const EdgeInsets.only(bottom: 14),
+      borderColor: isPending ? Neo.warning.op(0.5) : null,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Container(
-                width: 4,
-                height: 60,
-                decoration:
-                BoxDecoration(color: sevClr, borderRadius: BorderRadius.circular(2))),
-            const SizedBox(width: 12),
-            Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(children: [
-                    Expanded(
-                        child: Text(title,
-                            style: AppTheme.h3, maxLines: 1, overflow: TextOverflow.ellipsis)),
-                    const SizedBox(width: 8),
-                    StatusPill(
-                        label: AdminDashboardController.statusLabel(status), color: statusClr),
-                  ]),
-                  const SizedBox(height: 5),
-                  Row(children: [
-                    const Icon(Icons.location_on_outlined, size: 12, color: AppTheme.greyMedium),
-                    const SizedBox(width: 3),
-                    Expanded(
-                        child: Text(
-                          commune.isNotEmpty ? '$commune · $reference' : reference,
-                          style: AppTheme.caption,
-                          overflow: TextOverflow.ellipsis,
-                        )),
-                  ]),
-                  const SizedBox(height: 4),
-                  Row(children: [
-                    const Icon(Icons.label_outline, size: 12, color: AppTheme.greyMedium),
-                    const SizedBox(width: 3),
-                    Expanded(
-                        child: Text(catName,
-                            style: AppTheme.caption, overflow: TextOverflow.ellipsis)),
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                          color: sevClr.op(0.1), borderRadius: BorderRadius.circular(6)),
-                      child: Text(AdminDashboardController.severityLabel(severity),
-                          style: TextStyle(
-                              fontFamily: AppTheme.fontFamily,
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                              color: sevClr)),
-                    ),
-                  ]),
-                ])),
-          ]),
-        ),
-        if (isPending) ...[
-          Container(
-              height: 1,
-              color: AppTheme.warning.op(0.15),
-              margin: const EdgeInsets.symmetric(horizontal: 14)),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+        Row(children: [
+          NeoIconBadge(icon: Icons.report_gmailerrorred_rounded, color: sevClr, size: 46),
+          const SizedBox(width: 12),
+          Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Container(
-                    padding: const EdgeInsets.all(5),
+              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: Neo.t(14, w: FontWeight.w600)),
+              const SizedBox(height: 2),
+              Text(commune.isNotEmpty ? '$commune · $reference' : reference,
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: Neo.t(11, c: Neo.muted)),
+              Text('$catName · ${AdminDashboardController.severityLabel(severity)}',
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: Neo.t(10.5, w: FontWeight.w600, c: sevClr)),
+            ]),
+          ),
+          const SizedBox(width: 8),
+          NeoPill(label: AdminDashboardController.statusLabel(status), color: statusClr),
+        ]),
+        if (isPending) ...[
+          const SizedBox(height: 12),
+          Divider(height: 1, color: Neo.line.op(0.8)),
+          const SizedBox(height: 12),
+          Row(children: [
+            const Icon(Icons.route, size: 15, color: Neo.warning),
+            const SizedBox(width: 6),
+            Text('Choisir une autorité', style: Neo.t(12.5, w: FontWeight.w600)),
+          ]),
+          const SizedBox(height: 10),
+          if (isLoadingAuth)
+            const SizedBox(height: 32, child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Neo.blue))))
+          else if (authorities.isEmpty)
+            Text('Aucune autorité chargée', style: Neo.t(11, c: Neo.muted))
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: authorities.map((auth) {
+                final isRec = auth['recommended'] == true;
+                return NeoPressable(
+                  onTap: () => _confirmRoute(report, auth, ctrl),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
                     decoration: BoxDecoration(
-                        color: AppTheme.warning.op(0.1),
-                        borderRadius: BorderRadius.circular(6)),
-                    child: const Icon(Icons.route, size: 14, color: AppTheme.warning)),
-                const SizedBox(width: 7),
-                const Text('Choisir une autorité', style: AppTheme.h3),
-              ]),
-              const SizedBox(height: 8),
-              if (isLoadingAuth)
-                const SizedBox(
-                    height: 32,
-                    child: Center(
-                        child: SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: AppTheme.primaryGreen))))
-              else if (authorities.isEmpty)
-                const Text('Aucune autorité chargée', style: AppTheme.caption)
-              else
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: authorities.map((auth) {
-                    final isRec = auth['recommended'] == true;
-                    return GestureDetector(
-                      onTap: () => _confirmRoute(report, auth, ctrl),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryGreen.op(isRec ? 0.1 : 0.06),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: AppTheme.primaryGreen.op(isRec ? 0.5 : 0.25),
-                            width: isRec ? 1.5 : 1,
-                          ),
-                        ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          const Icon(Icons.account_balance,
-                              size: 12, color: AppTheme.primaryGreen),
-                          const SizedBox(width: 5),
-                          Text(_str(auth['name']),
-                              style: const TextStyle(
-                                  fontFamily: AppTheme.fontFamily,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppTheme.primaryGreen)),
-                          if (isRec) ...[
-                            const SizedBox(width: 4),
-                            Container(
-                              padding:
-                              const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                              decoration: BoxDecoration(
-                                  color: AppTheme.success,
-                                  borderRadius: BorderRadius.circular(4)),
-                              child: const Text('✓',
-                                  style: TextStyle(color: Colors.white, fontSize: 8)),
-                            ),
-                          ],
-                        ]),
-                      ),
-                    );
-                  }).toList(),
-                ),
-            ]),
-          ),
+                      color: Neo.blue.op(isRec ? 0.10 : 0.05),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Neo.blue.op(isRec ? 0.5 : 0.22), width: isRec ? 1.5 : 1),
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.account_balance, size: 13, color: Neo.blue),
+                      const SizedBox(width: 5),
+                      Text(_str(auth['name']), style: Neo.t(11.5, w: FontWeight.w600, c: Neo.blue)),
+                      if (isRec) ...[
+                        const SizedBox(width: 5),
+                        const Icon(Icons.check_circle, size: 13, color: Neo.success),
+                      ],
+                    ]),
+                  ),
+                );
+              }).toList(),
+            ),
         ] else ...[
-          Container(
-              height: 1,
-              color: AppTheme.greyLight.op(0.5),
-              margin: const EdgeInsets.symmetric(horizontal: 14)),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
-            child: Row(children: [
-              Icon(status == 'resolved' ? Icons.check_circle : Icons.schedule,
-                  size: 13, color: statusClr),
-              const SizedBox(width: 5),
-              Text(AdminDashboardController.statusLabel(status),
-                  style: TextStyle(
-                      fontFamily: AppTheme.fontFamily,
-                      fontSize: 11,
-                      color: statusClr,
-                      fontWeight: FontWeight.w600)),
-              const Spacer(),
-              Text(_fmtDate(report['created_at']), style: AppTheme.caption),
-            ]),
-          ),
+          const SizedBox(height: 10),
+          Row(children: [
+            Icon(status == 'resolved' ? Icons.check_circle : Icons.schedule, size: 14, color: statusClr),
+            const SizedBox(width: 5),
+            Text(AdminDashboardController.statusLabel(status), style: Neo.t(11.5, w: FontWeight.w600, c: statusClr)),
+            const Spacer(),
+            Text(_fmtDate(report['created_at']), style: Neo.t(11, c: Neo.muted)),
+          ]),
         ],
       ]),
     );
   }
 
-  void _confirmRoute(Map<String, dynamic> report, Map<String, dynamic> auth,
-      AdminDashboardController ctrl) {
+  void _confirmRoute(Map<String, dynamic> report, Map<String, dynamic> auth, AdminDashboardController ctrl) {
     final authName = _str(auth['name']);
     final reportTitle = _str(report['title'], 'Ce signalement');
     final reportId = _asInt(report['id']);
     final authId = _asInt(auth['id']);
 
     Get.dialog(Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusLg)),
+      backgroundColor: Neo.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Row(children: [
-            Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                    color: AppTheme.primaryGreen.op(0.08),
-                    borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.route, color: AppTheme.primaryGreen, size: 20)),
+            const NeoIconBadge(icon: Icons.route, size: 40),
             const SizedBox(width: 10),
-            const Text('Confirmer le routage', style: AppTheme.h2),
+            Expanded(child: Text('Confirmer le routage', style: Neo.t(16, w: FontWeight.w700))),
           ]),
           const SizedBox(height: 14),
-          Text(reportTitle, style: AppTheme.h3, maxLines: 2),
+          Text(reportTitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: Neo.t(13.5, w: FontWeight.w600)),
           const SizedBox(height: 14),
           Row(children: [
             Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                      color: AppTheme.warning.op(0.08), borderRadius: BorderRadius.circular(10)),
-                  child: const Column(children: [
-                    Icon(Icons.pending_actions, color: AppTheme.warning, size: 18),
-                    SizedBox(height: 4),
-                    Text('En attente',
-                        style: TextStyle(
-                            fontFamily: AppTheme.fontFamily,
-                            fontSize: 10,
-                            color: AppTheme.warning,
-                            fontWeight: FontWeight.w600)),
-                  ]),
-                )),
-            const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8),
-                child: Icon(Icons.arrow_forward, color: AppTheme.primaryGreen, size: 22)),
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Neo.warning.op(0.10), borderRadius: BorderRadius.circular(14)),
+                child: Column(children: [
+                  const Icon(Icons.pending_actions, color: Neo.warning, size: 18),
+                  const SizedBox(height: 4),
+                  Text('En attente', style: Neo.t(10, w: FontWeight.w600, c: Neo.warning)),
+                ]),
+              ),
+            ),
+            const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Icon(Icons.arrow_forward, color: Neo.blue, size: 22)),
             Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                      color: AppTheme.primaryGreen.op(0.08),
-                      borderRadius: BorderRadius.circular(10)),
-                  child: Column(children: [
-                    const Icon(Icons.account_balance, color: AppTheme.primaryGreen, size: 18),
-                    const SizedBox(height: 4),
-                    Text(authName,
-                        style: const TextStyle(
-                            fontFamily: AppTheme.fontFamily,
-                            fontSize: 10,
-                            color: AppTheme.primaryGreen,
-                            fontWeight: FontWeight.w600),
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis),
-                  ]),
-                )),
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Neo.blue.op(0.10), borderRadius: BorderRadius.circular(14)),
+                child: Column(children: [
+                  const Icon(Icons.account_balance, color: Neo.blue, size: 18),
+                  const SizedBox(height: 4),
+                  Text(authName, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: Neo.t(10, w: FontWeight.w600, c: Neo.blue)),
+                ]),
+              ),
+            ),
           ]),
           const SizedBox(height: 20),
           Row(children: [
-            Expanded(
-                child: OutlinedButton(
-                  onPressed: () => Get.back(),
-                  style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppTheme.greyLight),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(AppTheme.radiusMd))),
-                  child: const Text('Annuler'),
-                )),
+            Expanded(child: NeoButton(label: 'Annuler', outlined: true, onTap: () => Get.back())),
             const SizedBox(width: 10),
             Expanded(
-                child: ElevatedButton(
-                  onPressed: (reportId == null || authId == null)
-                      ? null
-                      : () {
-                    Get.back();
-                    ctrl.routeReport(
-                        reportId: reportId,
-                        authorityId: authId,
-                        authorityName: authName);
-                  },
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primaryGreen,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(AppTheme.radiusMd))),
-                  child: const Text('Router'),
-                )),
+              child: NeoButton(
+                label: 'Router',
+                onTap: (reportId == null || authId == null)
+                    ? null
+                    : () {
+                        Get.back();
+                        ctrl.routeReport(reportId: reportId, authorityId: authId, authorityName: authName);
+                      },
+              ),
+            ),
           ]),
         ]),
       ),
@@ -3266,125 +2266,18 @@ class _RoutingCard extends StatelessWidget {
   }
 }
 
-// ── États vides ──────────────────────────────────────────────────────────────
-
-class _EmptyState extends StatelessWidget {
-  final IconData icon;
-  final String message;
-  const _EmptyState({required this.icon, required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(icon, size: 64, color: AppTheme.greyLight),
-            const SizedBox(height: 12),
-            Text(message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontFamily: AppTheme.fontFamily,
-                    color: AppTheme.greyMedium,
-                    fontSize: 14,
-                    height: 1.5)),
-          ]),
-        ));
-  }
-}
-
 class _EmptyRoutingState extends StatelessWidget {
   final String filter;
   const _EmptyRoutingState({required this.filter});
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Container(
-              padding: const EdgeInsets.all(20),
-              decoration:
-              BoxDecoration(color: AppTheme.success.op(0.08), shape: BoxShape.circle),
-              child: Icon(Icons.check_circle_outline,
-                  size: 52, color: AppTheme.success.op(0.5))),
-          const SizedBox(height: 14),
-          Text(filter == 'pending' ? 'Aucun signalement en attente ✅' : 'Aucun signalement ici',
-              style: AppTheme.h3),
-          const SizedBox(height: 6),
-          Text(
-              filter == 'pending'
-                  ? 'Tous les signalements ont été routés'
-                  : "Changez le filtre pour voir d'autres",
-              style: AppTheme.caption),
-        ]));
-  }
-}
-
-// ── Paramètres — helpers ──────────────────────────────────────────────────────
-
-class _SettingsSection extends StatelessWidget {
-  final String title;
-  final List<_SettingsItem> items;
-  const _SettingsSection({required this.title, required this.items});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 8),
-          child: Text(title, style: AppTheme.label)),
-      Container(
-        decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            boxShadow: AppTheme.cardShadow()),
-        child: Column(
-          children: items.asMap().entries.map((e) {
-            final isLast = e.key == items.length - 1;
-            return Column(children: [
-              e.value,
-              if (!isLast)
-                Divider(height: 1, color: AppTheme.greyLight.op(0.7), indent: 52),
-            ]);
-          }).toList(),
-        ),
-      ),
-    ]);
-  }
-}
-
-class _SettingsItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Widget? trailing;
-  final bool isAction;
-  final VoidCallback? onTap;
-  const _SettingsItem(
-      {required this.icon,
-        required this.label,
-        this.trailing,
-        this.isAction = false,
-        this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      onTap: onTap,
-      leading: Container(
-          padding: const EdgeInsets.all(7),
-          decoration: BoxDecoration(
-              color: AppTheme.primaryGreen.op(0.08), borderRadius: BorderRadius.circular(8)),
-          child: Icon(icon, color: AppTheme.primaryGreen, size: 18)),
-      title: Text(label,
-          style: const TextStyle(
-              fontFamily: AppTheme.fontFamily,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.darkBlue)),
-      trailing: trailing ??
-          (isAction
-              ? const Icon(Icons.chevron_right, color: AppTheme.greyMedium, size: 18)
-              : null),
+    return NeoEmpty(
+      icon: Icons.check_circle_outline,
+      title: filter == 'pending' ? 'Aucun signalement en attente' : 'Aucun signalement ici',
+      message: filter == 'pending'
+          ? 'Tous les signalements ont été routés.'
+          : "Changez le filtre pour voir d'autres signalements.",
     );
   }
 }

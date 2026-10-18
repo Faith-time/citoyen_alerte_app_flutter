@@ -1,3 +1,9 @@
+// lib/presentation/screens/reports/create_report_screen.dart
+//
+// Design Neo. La logique du controller est inchangée, sauf l'ajout de
+// `reloadCategories()` (le bouton "Réessayer" appelait onInit(), qui
+// relançait aussi la géolocalisation).
+
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart' hide FormData, MultipartFile;
@@ -5,9 +11,11 @@ import 'package:dio/dio.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:citoyen_alerte_app_backup/core/theme/app_theme.dart';
+import 'package:citoyen_alerte_app_backup/core/theme/neo_kit.dart';
 import 'package:citoyen_alerte_app_backup/core/services/api_service.dart';
 import 'package:citoyen_alerte_app_backup/data/models/category_model.dart';
 import 'package:geocoding/geocoding.dart' as geo;
+import 'report_neo_widgets.dart';
 
 const List<String> kSenegalRegions = [
   'Dakar', 'Thiès', 'Diourbel', 'Fatick', 'Kaffrine', 'Kaolack',
@@ -20,6 +28,10 @@ class MediaItem {
   final bool isVideo;
   MediaItem({required this.file, required this.isVideo});
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// CONTROLLER (logique inchangée)
+// ─────────────────────────────────────────────────────────────────────────
 
 class CreateReportController extends GetxController {
   final ApiService  _api    = Get.find<ApiService>();
@@ -71,6 +83,9 @@ class CreateReportController extends GetxController {
     super.onClose();
   }
 
+  /// Recharge uniquement les catégories (bouton "Réessayer").
+  Future<void> reloadCategories() => _loadCategories();
+
   Future<void> _loadCategories() async {
     try {
       isLoadingCategories.value = true;
@@ -104,10 +119,6 @@ class CreateReportController extends GetxController {
   List<CategoryModel> _dedupeCategories(List<CategoryModel> all) {
     final sorted = [...all]..sort((a, b) => a.id.compareTo(b.id));
 
-    // 1) Catégories parentes : on garde la plus ancienne par nom, et on
-    //    construit une table de correspondance ANCIEN id parent -> id
-    //    parent conservé, pour pouvoir rattacher correctement les
-    //    sous-catégories ensuite.
     final parents = sorted.where((c) => c.parentId == null).toList();
     final Map<String, CategoryModel> keptParentByName = {};
     final Map<int, int> parentIdRedirect = {};
@@ -123,9 +134,6 @@ class CreateReportController extends GetxController {
       }
     }
 
-    // 2) Sous-catégories : on les rattache d'abord au parent conservé
-    //    (au cas où elles pointaient vers un parent en doublon), puis on
-    //    déduplique par (parent conservé, nom).
     final children = sorted.where((c) => c.parentId != null).toList();
     final Map<String, CategoryModel> keptChildByKey = {};
 
@@ -138,8 +146,6 @@ class CreateReportController extends GetxController {
             ? c
             : c.copyWith(parentId: canonicalParentId);
       }
-      // Si un doublon a un id plus petit, "sorted" garantit qu'on a déjà
-      // traité le plus petit id en premier, donc rien à faire de plus.
     }
 
     return [...keptParentByName.values, ...keptChildByKey.values];
@@ -458,6 +464,8 @@ class CreateReportScreen extends StatefulWidget {
 class _CreateReportScreenState extends State<CreateReportScreen> {
   late final CreateReportController ctrl;
 
+  static const _stepLabels = ['Le problème', 'Photo et gravité', 'Le lieu'];
+
   @override
   void initState() {
     super.initState();
@@ -470,150 +478,135 @@ class _CreateReportScreenState extends State<CreateReportScreen> {
     super.dispose();
   }
 
+  void _onBack() {
+    if (ctrl.showingSubcategories.value) {
+      ctrl.backFromSubcategories();
+    } else if (ctrl.currentStep.value > 0) {
+      ctrl.goPrev();
+    } else {
+      Get.back();
+    }
+  }
+
+  String _subtitle() {
+    if (ctrl.showingSubcategories.value) return 'Précisez le problème';
+    final i = ctrl.currentStep.value;
+    return 'Étape ${i + 1}/3 · ${_stepLabels[i.clamp(0, 2).toInt()]}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(120),
-        child: Container(
-          decoration: const BoxDecoration(
-            color: AppTheme.primaryGreen,
-            borderRadius: BorderRadius.only(bottomLeft: Radius.circular(24), bottomRight: Radius.circular(24)),
+      backgroundColor: Neo.bg,
+      body: NeoBackdrop(
+        child: Column(children: [
+          Obx(() => NeoTitleBar(
+            title: 'Faire un signalement',
+            subtitle: _subtitle(),
+            leading: NeoIconButton(icon: Icons.arrow_back_ios_new_rounded, onTap: _onBack),
+          )),
+          Obx(() => _StepDots(currentStep: ctrl.currentStep.value)),
+          const SizedBox(height: 4),
+          Expanded(
+            child: Obx(() {
+              if (ctrl.showingSubcategories.value) {
+                return _StepSubcategory(key: const ValueKey('step-sub'), ctrl: ctrl);
+              }
+              switch (ctrl.currentStep.value) {
+                case 0:
+                  return _StepCategory(key: const ValueKey('step-0'), ctrl: ctrl);
+                case 1:
+                  return _StepPhotoSeverity(key: const ValueKey('step-1'), ctrl: ctrl);
+                case 2:
+                  return _StepLocation(key: const ValueKey('step-2'), ctrl: ctrl);
+                default:
+                  return const SizedBox.shrink(key: ValueKey('step-default'));
+              }
+            }),
           ),
-          child: SafeArea(
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
-                        onPressed: () {
-                          if (ctrl.showingSubcategories.value) {
-                            ctrl.backFromSubcategories();
-                          } else if (ctrl.currentStep.value > 0) {
-                            ctrl.goPrev();
-                          } else {
-                            Get.back();
-                          }
-                        },
-                      ),
-                      const Expanded(
-                        child: Text('Faire un signalement',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontFamily: 'Poppins', fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
-                      ),
-                      const SizedBox(width: 48),
-                    ],
+          Obx(() {
+            if (ctrl.showingSubcategories.value) return const SizedBox.shrink();
+            final isLast = ctrl.currentStep.value == 2;
+            final loading = ctrl.isLoading.value;
+            return SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: NeoButton(
+                    label: loading ? 'Envoi en cours…' : (isLast ? 'Envoyer' : 'Suivant'),
+                    onTap: loading
+                        ? null
+                        : () {
+                      if (isLast) {
+                        ctrl.submitReport();
+                      } else {
+                        ctrl.goNext();
+                      }
+                    },
                   ),
                 ),
-                Obx(() => _BigStepDots(currentStep: ctrl.currentStep.value)),
-                const SizedBox(height: 8),
-              ],
-            ),
-          ),
-        ),
+              ),
+            );
+          }),
+        ]),
       ),
-      body: Obx(() {
-        if (ctrl.showingSubcategories.value) {
-          return _StepSubcategory(key: const ValueKey('step-sub'), ctrl: ctrl);
-        }
-        switch (ctrl.currentStep.value) {
-          case 0:
-            return _StepCategory(key: const ValueKey('step-0'), ctrl: ctrl);
-          case 1:
-            return _StepPhotoSeverity(key: const ValueKey('step-1'), ctrl: ctrl);
-          case 2:
-            return _StepLocation(key: const ValueKey('step-2'), ctrl: ctrl);
-          default:
-            return const SizedBox.shrink(key: ValueKey('step-default'));
-        }
-      }),
-      bottomNavigationBar: Obx(() {
-        if (ctrl.showingSubcategories.value) return const SizedBox.shrink();
-        final isLast = ctrl.currentStep.value == 2;
-        return Container(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 26),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            boxShadow: [BoxShadow(color: Color(0x10000000), blurRadius: 12, offset: Offset(0, -4))],
-          ),
-          child: SizedBox(
-            height: 58,
-            child: ElevatedButton(
-              onPressed: ctrl.isLoading.value
-                  ? null
-                  : () {
-                if (isLast) {
-                  ctrl.submitReport();
-                } else {
-                  ctrl.goNext();
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryGreen,
-                disabledBackgroundColor: AppTheme.greyLight,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              ),
-              child: ctrl.isLoading.value
-                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
-                  : Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(isLast ? 'Envoyer' : 'Suivant',
-                      style: const TextStyle(fontFamily: 'Poppins', fontSize: 17, fontWeight: FontWeight.w700, color: Colors.white)),
-                  const SizedBox(width: 8),
-                  Icon(isLast ? Icons.send_rounded : Icons.arrow_forward_rounded, color: Colors.white, size: 20),
-                ],
-              ),
-            ),
-          ),
-        );
-      }),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// INDICATEUR D'ÉTAPES — icônes uniquement, pas de texte
+// INDICATEUR D'ÉTAPES — icônes uniquement
 // ─────────────────────────────────────────────────────────────────────────
 
-class _BigStepDots extends StatelessWidget {
+class _StepDots extends StatelessWidget {
   final int currentStep;
-  const _BigStepDots({required this.currentStep});
+  const _StepDots({required this.currentStep});
 
   @override
   Widget build(BuildContext context) {
     const icons = [Icons.category_rounded, Icons.camera_alt_rounded, Icons.place_rounded];
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(icons.length * 2 - 1, (i) {
-        if (i.isOdd) {
-          final done = (i ~/ 2) < currentStep;
-          return Container(width: 30, height: 2, color: done ? Colors.white : Colors.white.withOpacity(0.3));
-        }
-        final idx = i ~/ 2;
-        final done = idx <= currentStep;
-        final current = idx == currentStep;
-        return Container(
-          width: 38, height: 38,
-          decoration: BoxDecoration(
-            color: done ? Colors.white : Colors.white.withOpacity(0.2),
-            shape: BoxShape.circle,
-            border: current ? Border.all(color: Colors.white, width: 2.5) : null,
-          ),
-          child: Icon(icons[idx], size: 18, color: done ? AppTheme.primaryGreen : Colors.white.withOpacity(0.7)),
-        );
-      }),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: List.generate(icons.length * 2 - 1, (i) {
+          if (i.isOdd) {
+            final done = (i ~/ 2) < currentStep;
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 34,
+              height: 3,
+              margin: const EdgeInsets.symmetric(horizontal: 6),
+              decoration: BoxDecoration(
+                color: done ? Neo.blue : Neo.line,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            );
+          }
+          final idx = i ~/ 2;
+          final active = idx <= currentStep;
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: active ? Neo.blue : Neo.surface,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 3),
+              boxShadow: Neo.softRelief(),
+            ),
+            child: Icon(icons[idx], size: 19, color: active ? Colors.white : Neo.muted),
+          );
+        }),
+      ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// ÉTAPE 1 — CATÉGORIE (icônes géantes)
+// ÉTAPE 1 — CATÉGORIE
 // ─────────────────────────────────────────────────────────────────────────
 
 IconData categoryIconFor(String? name) {
@@ -630,116 +623,115 @@ IconData categoryIconFor(String? name) {
   return Icons.report_problem_outlined;
 }
 
-class _StepCategory extends StatefulWidget {
+class _StepCategory extends StatelessWidget {
   final CreateReportController ctrl;
   const _StepCategory({super.key, required this.ctrl});
 
   @override
-  State<_StepCategory> createState() => _StepCategoryState();
-}
-
-class _StepCategoryState extends State<_StepCategory> {
-  @override
-  void initState() {
-    super.initState();
-    widget.ctrl.isLoadingCategories.listen((_) { if (mounted) setState(() {}); });
-    widget.ctrl.categories.listen((_)         { if (mounted) setState(() {}); });
-    widget.ctrl.selectedParentCategoryId.listen((_) { if (mounted) setState(() {}); });
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final isLoading  = widget.ctrl.isLoadingCategories.value;
-    final allCats    = widget.ctrl.categories.toList();
-    final selectedId = widget.ctrl.selectedParentCategoryId.value;
-    final parents    = allCats.where((c) => c.parentId == null).toList();
+    return Obx(() {
+      final isLoading = ctrl.isLoadingCategories.value;
+      final selectedId = ctrl.selectedParentCategoryId.value;
+      final parents = ctrl.categories.where((c) => c.parentId == null).toList();
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 90),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Quel est le problème ?',
-              style: TextStyle(fontFamily: 'Poppins', fontSize: 19,
-                  fontWeight: FontWeight.w800, color: AppTheme.darkBlue)),
-          const SizedBox(height: 4),
-          const Text('Appuyez sur une image',
-              style: TextStyle(fontFamily: 'Poppins', fontSize: 13,
-                  color: AppTheme.greyMedium)),
-          const SizedBox(height: 20),
-
-          if (isLoading)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(60),
-                child: CircularProgressIndicator(color: AppTheme.primaryGreen),
+      return SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Quel est le problème ?', style: Neo.t(20, w: FontWeight.w800)),
+            const SizedBox(height: 4),
+            Text('Appuyez sur une image', style: Neo.t(13, c: Neo.muted)),
+            const SizedBox(height: 20),
+            if (isLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 60),
+                child: Center(child: CircularProgressIndicator(color: Neo.blue)),
+              )
+            else if (parents.isEmpty)
+              Column(children: [
+                const NeoEmpty(
+                  icon: Icons.wifi_off_rounded,
+                  title: 'Impossible de charger',
+                  message: 'Vérifiez votre connexion et réessayez.',
+                ),
+                const SizedBox(height: 12),
+                NeoButton(label: 'Réessayer', onTap: ctrl.reloadCategories),
+              ])
+            else
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: parents.length,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 14,
+                  mainAxisSpacing: 14,
+                  childAspectRatio: 1.05,
+                ),
+                itemBuilder: (_, i) {
+                  final cat = parents[i];
+                  return _CategoryTile(
+                    label: cat.name,
+                    icon: categoryIconFor(cat.name),
+                    selected: selectedId == cat.id,
+                    onTap: () => ctrl.selectParentCategory(cat.id),
+                  );
+                },
               ),
-            )
-          else if (parents.isEmpty)
-            _BigErrorCard(onRetry: widget.ctrl.onInit)
-          else
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: parents.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 14,
-                mainAxisSpacing: 14,
-                childAspectRatio: 1.05,
-              ),
-              itemBuilder: (_, i) {
-                final cat = parents[i];
-                return _BigCategoryTile(
-                  label: cat.name,
-                  icon: categoryIconFor(cat.name),
-                  selected: selectedId == cat.id,
-                  onTap: () => widget.ctrl.selectParentCategory(cat.id),
-                );
-              },
-            ),
-        ],
-      ),
-    );
+          ],
+        ),
+      );
+    });
   }
 }
 
-class _BigCategoryTile extends StatelessWidget {
+class _CategoryTile extends StatelessWidget {
   final String label;
   final IconData icon;
   final bool selected;
   final VoidCallback onTap;
-  const _BigCategoryTile({super.key, required this.label, required this.icon, required this.selected, required this.onTap});
+  const _CategoryTile({required this.label, required this.icon, required this.selected, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          decoration: BoxDecoration(
-            color: selected ? AppTheme.primaryGreen : Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: selected ? AppTheme.primaryGreen : AppTheme.greyLight, width: selected ? 2 : 1),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 3))],
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 48, color: selected ? Colors.white : AppTheme.primaryGreen),
-              const SizedBox(height: 10),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Text(label,
-                    textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontFamily: 'Poppins', fontSize: 13, fontWeight: FontWeight.w700, color: selected ? Colors.white : AppTheme.darkBlue)),
+    return NeoPressable(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
+          color: selected ? Neo.blue : Neo.surface,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: selected ? Neo.blue : Colors.white, width: 2),
+          boxShadow: Neo.softRelief(),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: selected
+                    ? Colors.white.withValues(alpha: 0.2)
+                    : Neo.blue.withValues(alpha: 0.10),
               ),
-            ],
-          ),
+              child: Icon(icon, size: 28, color: selected ? Colors.white : Neo.blue),
+            ),
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Neo.t(13, w: FontWeight.w700, c: selected ? Colors.white : Neo.ink),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -752,39 +744,48 @@ class _StepSubcategory extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Précisez',
-              style: TextStyle(fontFamily: 'Poppins', fontSize: 19, fontWeight: FontWeight.w800, color: AppTheme.darkBlue)),
-          const SizedBox(height: 20),
-          Expanded(
-            child: GridView.builder(
-              itemCount: ctrl.subCategories.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2, crossAxisSpacing: 14, mainAxisSpacing: 14, childAspectRatio: 1.05,
+    return Obx(() {
+      final subs = ctrl.subCategories;
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Précisez', style: Neo.t(20, w: FontWeight.w800)),
+            const SizedBox(height: 4),
+            Text('Quel type de problème exactement ?', style: Neo.t(13, c: Neo.muted)),
+            const SizedBox(height: 20),
+            Expanded(
+              child: GridView.builder(
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.only(bottom: 24),
+                itemCount: subs.length,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 14,
+                  mainAxisSpacing: 14,
+                  childAspectRatio: 1.05,
+                ),
+                itemBuilder: (_, i) {
+                  final sub = subs[i];
+                  return _CategoryTile(
+                    label: sub.name,
+                    icon: categoryIconFor(sub.name),
+                    selected: false,
+                    onTap: () => ctrl.selectSubcategory(sub.id),
+                  );
+                },
               ),
-              itemBuilder: (_, i) {
-                final sub = ctrl.subCategories[i];
-                return _BigCategoryTile(
-                  label: sub.name,
-                  icon: categoryIconFor(sub.name),
-                  selected: false,
-                  onTap: () => ctrl.selectSubcategory(sub.id),
-                );
-              },
             ),
-          ),
-        ],
-      ),
-    );
+          ],
+        ),
+      );
+    });
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// ÉTAPE 2 — MÉDIA (photo ou vidéo, facultatif) + GRAVITÉ
+// ÉTAPE 2 — MÉDIA (facultatif) + GRAVITÉ
 // ─────────────────────────────────────────────────────────────────────────
 
 class _StepPhotoSeverity extends StatelessWidget {
@@ -794,15 +795,15 @@ class _StepPhotoSeverity extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Ajoutez une photo ou une vidéo (facultatif)',
-              style: TextStyle(fontFamily: 'Poppins', fontSize: 19, fontWeight: FontWeight.w800, color: AppTheme.darkBlue)),
+          Text('Ajoutez une photo ou une vidéo', style: Neo.t(20, w: FontWeight.w800)),
           const SizedBox(height: 4),
-          const Text('Ça aide les agents à mieux comprendre le problème',
-              style: TextStyle(fontFamily: 'Poppins', fontSize: 13, color: AppTheme.greyMedium)),
+          Text('Facultatif · ça aide les agents à comprendre le problème',
+              style: Neo.t(13, c: Neo.muted)),
           const SizedBox(height: 20),
 
           Obx(() {
@@ -828,86 +829,36 @@ class _StepPhotoSeverity extends StatelessWidget {
                 ],
               );
             }
-            return Column(
+            return SizedBox(
               key: const ValueKey('media-list'),
-              children: [
-                SizedBox(
-                  height: 140,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    children: [
-                      ...ctrl.mediaFiles.asMap().entries.map((e) => Container(
-                        key: ValueKey('media-${e.key}-${e.value.file.path}'),
+              height: 140,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                children: [
+                  ...ctrl.mediaFiles.asMap().entries.map((e) => _MediaThumb(
+                    key: ValueKey('media-${e.key}-${e.value.file.path}'),
+                    item: e.value,
+                    onRemove: () => ctrl.removeMedia(e.key),
+                  )),
+                  if (ctrl.mediaFiles.length < CreateReportController.maxMedia)
+                    GestureDetector(
+                      key: const ValueKey('add-media-tile'),
+                      onTap: ctrl.takePhoto,
+                      onLongPress: ctrl.recordVideo,
+                      child: Container(
                         width: 140,
                         height: 140,
-                        margin: const EdgeInsets.only(right: 10),
                         decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: AppTheme.greyLight)),
-                        child: Stack(
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(16),
-                              child: e.value.isVideo
-                                  ? Container(
-                                width: 140,
-                                height: 140,
-                                color: AppTheme.darkBlue,
-                                child: const Icon(Icons.play_circle_fill_rounded,
-                                    color: Colors.white, size: 40),
-                              )
-                                  : Image.file(e.value.file, width: 140, height: 140, fit: BoxFit.cover),
-                            ),
-                            if (e.value.isVideo)
-                              const Positioned(
-                                bottom: 6,
-                                left: 6,
-                                child: _MediaTag(label: 'VIDÉO'),
-                              ),
-                            Positioned(
-                              top: 6,
-                              right: 6,
-                              child: Material(
-                                color: Colors.transparent,
-                                shape: const CircleBorder(),
-                                clipBehavior: Clip.antiAlias,
-                                child: InkWell(
-                                  onTap: () => ctrl.removeMedia(e.key),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(5),
-                                    decoration: const BoxDecoration(color: AppTheme.error, shape: BoxShape.circle),
-                                    child: const Icon(Icons.close, color: Colors.white, size: 16),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
+                          borderRadius: BorderRadius.circular(22),
+                          color: Neo.blue.withValues(alpha: 0.06),
+                          border: Border.all(color: Neo.blue.withValues(alpha: 0.35), width: 1.5),
                         ),
-                      )),
-                      if (ctrl.mediaFiles.length < CreateReportController.maxMedia)
-                        Container(
-                          key: const ValueKey('add-media-tile'),
-                          width: 140,
-                          height: 140,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: AppTheme.primaryGreen.withOpacity(0.4)),
-                            color: AppTheme.primaryGreen.withOpacity(0.05),
-                          ),
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(16),
-                              onTap: ctrl.takePhoto,
-                              onLongPress: ctrl.recordVideo,
-                              child: const Icon(Icons.add_a_photo_rounded, color: AppTheme.primaryGreen, size: 34),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
+                        child: const Icon(Icons.add_a_photo_rounded, color: Neo.blue, size: 34),
+                      ),
+                    ),
+                ],
+              ),
             );
           }),
 
@@ -918,52 +869,54 @@ class _StepPhotoSeverity extends StatelessWidget {
               children: [
                 TextButton.icon(
                   onPressed: () => ctrl.pickFromGallery(video: false),
-                  icon: const Icon(Icons.photo_library_outlined, size: 16, color: AppTheme.greyMedium),
-                  label: const Text('Photo depuis la galerie',
-                      style: TextStyle(fontFamily: 'Poppins', fontSize: 12, color: AppTheme.greyMedium)),
+                  icon: const Icon(Icons.photo_library_outlined, size: 16, color: Neo.muted),
+                  label: Text('Photo depuis la galerie', style: Neo.t(12, c: Neo.muted)),
                 ),
                 TextButton.icon(
                   onPressed: () => ctrl.pickFromGallery(video: true),
-                  icon: const Icon(Icons.video_library_outlined, size: 16, color: AppTheme.greyMedium),
-                  label: const Text('Vidéo depuis la galerie',
-                      style: TextStyle(fontFamily: 'Poppins', fontSize: 12, color: AppTheme.greyMedium)),
+                  icon: const Icon(Icons.video_library_outlined, size: 16, color: Neo.muted),
+                  label: Text('Vidéo depuis la galerie', style: Neo.t(12, c: Neo.muted)),
                 ),
               ],
             ),
           ),
 
-          const SizedBox(height: 24),
-          const Text('C\'est grave ?',
-              style: TextStyle(fontFamily: 'Poppins', fontSize: 19, fontWeight: FontWeight.w800, color: AppTheme.darkBlue)),
+          const SizedBox(height: 20),
+          Text("C'est grave ?", style: Neo.t(20, w: FontWeight.w800)),
           const SizedBox(height: 16),
           Obx(() => Row(
             children: [
               Expanded(
-                  child: _EmojiSeverityBtn(
-                      emoji: '😌',
-                      label: 'Non',
-                      color: AppTheme.success,
-                      selected: ctrl.selectedSeverity.value == 'low',
-                      onTap: () => ctrl.selectedSeverity.value = 'low')),
+                child: _SeverityTile(
+                  emoji: '😌',
+                  label: 'Non',
+                  color: Neo.success,
+                  selected: ctrl.selectedSeverity.value == 'low',
+                  onTap: () => ctrl.selectedSeverity.value = 'low',
+                ),
+              ),
               const SizedBox(width: 10),
               Expanded(
-                  child: _EmojiSeverityBtn(
-                      emoji: '🙁',
-                      label: 'Un peu',
-                      color: AppTheme.warning,
-                      selected: ctrl.selectedSeverity.value == 'medium',
-                      onTap: () => ctrl.selectedSeverity.value = 'medium')),
+                child: _SeverityTile(
+                  emoji: '🙁',
+                  label: 'Un peu',
+                  color: Neo.warning,
+                  selected: ctrl.selectedSeverity.value == 'medium',
+                  onTap: () => ctrl.selectedSeverity.value = 'medium',
+                ),
+              ),
               const SizedBox(width: 10),
               Expanded(
-                  child: _EmojiSeverityBtn(
-                      emoji: '🚨',
-                      label: 'Urgent',
-                      color: AppTheme.error,
-                      selected: ctrl.selectedSeverity.value == 'high',
-                      onTap: () => ctrl.selectedSeverity.value = 'high')),
+                child: _SeverityTile(
+                  emoji: '🚨',
+                  label: 'Urgent',
+                  color: Neo.danger,
+                  selected: ctrl.selectedSeverity.value == 'high',
+                  onTap: () => ctrl.selectedSeverity.value = 'high',
+                ),
+              ),
             ],
           )),
-          const SizedBox(height: 90),
         ],
       ),
     );
@@ -978,87 +931,131 @@ class _BigMediaButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: Container(
-          height: 140,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            color: AppTheme.primaryGreen.withOpacity(0.08),
-            border: Border.all(color: AppTheme.primaryGreen, width: 2),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 40, color: AppTheme.primaryGreen),
-              const SizedBox(height: 8),
-              Text(label,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontFamily: 'Poppins', fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.primaryGreen)),
-            ],
-          ),
+    return NeoPressable(
+      onTap: onTap,
+      child: Container(
+        height: 140,
+        decoration: BoxDecoration(
+          color: Neo.surface,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: Neo.softRelief(),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Neo.blue.withValues(alpha: 0.10),
+              ),
+              child: Icon(icon, size: 30, color: Neo.blue),
+            ),
+            const SizedBox(height: 10),
+            Text(label,
+                textAlign: TextAlign.center,
+                style: Neo.t(13, w: FontWeight.w700, c: Neo.blue)),
+          ],
         ),
       ),
     );
   }
 }
 
-class _MediaTag extends StatelessWidget {
-  final String label;
-  const _MediaTag({required this.label});
+class _MediaThumb extends StatelessWidget {
+  final MediaItem item;
+  final VoidCallback onRemove;
+  const _MediaThumb({super.key, required this.item, required this.onRemove});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      width: 140,
+      height: 140,
+      margin: const EdgeInsets.only(right: 10),
       decoration: BoxDecoration(
-        color: AppTheme.darkBlue,
-        borderRadius: BorderRadius.circular(6),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 4)],
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white, width: 3),
+        boxShadow: Neo.softRelief(),
       ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          fontFamily: 'Poppins',
-          fontSize: 9.5,
-          fontWeight: FontWeight.w800,
-          color: Colors.white,
-          letterSpacing: 0.5,
-        ),
+      child: Stack(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(19),
+            child: item.isVideo
+                ? Container(
+              width: 134,
+              height: 134,
+              color: Neo.ink,
+              child: const Icon(Icons.play_circle_fill_rounded, color: Colors.white, size: 40),
+            )
+                : Image.file(item.file, width: 134, height: 134, fit: BoxFit.cover),
+          ),
+          if (item.isVideo)
+            Positioned(
+              bottom: 8,
+              left: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Neo.ink,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text('VIDÉO', style: Neo.t(9.5, w: FontWeight.w800, c: Colors.white)),
+              ),
+            ),
+          Positioned(
+            top: 6,
+            right: 6,
+            child: GestureDetector(
+              onTap: onRemove,
+              child: Container(
+                padding: const EdgeInsets.all(5),
+                decoration: const BoxDecoration(color: Neo.danger, shape: BoxShape.circle),
+                child: const Icon(Icons.close, color: Colors.white, size: 15),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _EmojiSeverityBtn extends StatelessWidget {
+class _SeverityTile extends StatelessWidget {
   final String emoji;
   final String label;
   final Color color;
   final bool selected;
   final VoidCallback onTap;
-  const _EmojiSeverityBtn({required this.emoji, required this.label, required this.color, required this.selected, required this.onTap});
+  const _SeverityTile({
+    required this.emoji,
+    required this.label,
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return NeoPressable(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(vertical: 16),
         decoration: BoxDecoration(
-          color: selected ? color : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: selected ? color : AppTheme.greyLight, width: selected ? 2 : 1),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6, offset: const Offset(0, 2))],
+          color: selected ? color : Neo.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: selected ? color : Colors.white, width: 2),
+          boxShadow: Neo.softRelief(),
         ),
         child: Column(
           children: [
             Text(emoji, style: const TextStyle(fontSize: 34)),
             const SizedBox(height: 4),
-            Text(label, style: TextStyle(fontFamily: 'Poppins', fontSize: 12, fontWeight: FontWeight.w700, color: selected ? Colors.white : color)),
+            Text(label, style: Neo.t(12, w: FontWeight.w700, c: selected ? Colors.white : color)),
           ],
         ),
       ),
@@ -1067,7 +1064,7 @@ class _EmojiSeverityBtn extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// ÉTAPE 3 — LIEU (détection auto + repli manuel) + envoi
+// ÉTAPE 3 — LIEU (détection auto + repli manuel)
 // ─────────────────────────────────────────────────────────────────────────
 
 class _StepLocation extends StatelessWidget {
@@ -1077,12 +1074,12 @@ class _StepLocation extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Où est le problème ?',
-              style: TextStyle(fontFamily: 'Poppins', fontSize: 19, fontWeight: FontWeight.w800, color: AppTheme.darkBlue)),
+          Text('Où est le problème ?', style: Neo.t(20, w: FontWeight.w800)),
           const SizedBox(height: 16),
 
           Obx(() {
@@ -1096,34 +1093,35 @@ class _StepLocation extends StatelessWidget {
           }),
 
           const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: AppTheme.background, borderRadius: BorderRadius.circular(14)),
+          NeoCard(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             child: Obx(() => Row(
               children: [
-                const Icon(Icons.privacy_tip_outlined, color: AppTheme.primaryGreen, size: 20),
+                const Icon(Icons.privacy_tip_outlined, color: Neo.blue, size: 20),
                 const SizedBox(width: 10),
-                const Expanded(
-                  child: Text('Rester anonyme',
-                      style: TextStyle(fontFamily: 'Poppins', fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.darkBlue)),
+                Expanded(
+                  child: Text('Rester anonyme', style: Neo.t(13, w: FontWeight.w600)),
                 ),
                 Switch(
                   value: ctrl.isAnonymous.value,
-                  activeColor: AppTheme.primaryGreen,
+                  activeTrackColor: Neo.blue,
+                  inactiveTrackColor: Neo.inset,
+                  thumbColor: WidgetStateProperty.all(Colors.white),
+                  trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
                   onChanged: (v) => ctrl.isAnonymous.value = v,
                 ),
               ],
             )),
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Obx(() => TextButton(
             onPressed: () => ctrl.showAdvancedText.value = !ctrl.showAdvancedText.value,
             child: Text(
               ctrl.showAdvancedText.value
                   ? 'Masquer le texte du signalement'
                   : 'Écrire un texte personnalisé (optionnel)',
-              style: const TextStyle(fontFamily: 'Poppins', fontSize: 12, color: AppTheme.greyMedium),
+              style: Neo.t(12, c: Neo.muted),
             ),
           )),
           Obx(() {
@@ -1132,13 +1130,13 @@ class _StepLocation extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 8),
-                _SimpleField(
+                ReportNeoField(
                   controller: ctrl.titleCtrl,
                   hint: ctrl.categoryLabel,
                   icon: Icons.title_rounded,
                 ),
                 const SizedBox(height: 10),
-                _SimpleField(
+                ReportNeoField(
                   controller: ctrl.descriptionCtrl,
                   hint: 'Décrivez le problème...',
                   icon: Icons.description_outlined,
@@ -1147,8 +1145,6 @@ class _StepLocation extends StatelessWidget {
               ],
             );
           }),
-
-          const SizedBox(height: 90),
         ],
       ),
     );
@@ -1160,16 +1156,18 @@ class _LocatingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return NeoCard(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: AppTheme.background, borderRadius: BorderRadius.circular(16)),
-      child: const Row(
+      child: Row(
         children: [
-          SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: AppTheme.primaryGreen)),
-          SizedBox(width: 14),
+          const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2.5, color: Neo.blue),
+          ),
+          const SizedBox(width: 14),
           Expanded(
-            child: Text('Localisation en cours...',
-                style: TextStyle(fontFamily: 'Poppins', fontSize: 14, color: AppTheme.greyMedium)),
+            child: Text('Localisation en cours...', style: Neo.t(14, c: Neo.muted)),
           ),
         ],
       ),
@@ -1186,26 +1184,22 @@ class _DetectedLocationCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
+        NeoCard(
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppTheme.primaryGreen.withOpacity(0.06),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppTheme.primaryGreen.withOpacity(0.3)),
-          ),
+          borderColor: Neo.blue.withValues(alpha: 0.35),
           child: Row(
             children: [
-              const Icon(Icons.location_on_rounded, color: AppTheme.primaryGreen, size: 28),
-              const SizedBox(width: 12),
+              const NeoIconBadge(icon: Icons.location_on_rounded, color: Neo.blue, size: 46),
+              const SizedBox(width: 14),
               Expanded(
                 child: Obx(() => Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(ctrl.detectedCommune.value ?? '',
-                        style: const TextStyle(fontFamily: 'Poppins', fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.darkBlue)),
+                        style: Neo.t(15, w: FontWeight.w700)),
                     const SizedBox(height: 2),
                     Text(ctrl.detectedRegion.value ?? '',
-                        style: const TextStyle(fontFamily: 'Poppins', fontSize: 13, color: AppTheme.greyMedium)),
+                        style: Neo.t(13, c: Neo.muted)),
                   ],
                 )),
               ),
@@ -1213,19 +1207,17 @@ class _DetectedLocationCard extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        Row(
+        Wrap(
           children: [
             TextButton.icon(
               onPressed: () => ctrl.locateMe(),
-              icon: const Icon(Icons.refresh_rounded, size: 16, color: AppTheme.primaryGreen),
-              label: const Text('Actualiser',
-                  style: TextStyle(fontFamily: 'Poppins', fontSize: 12, color: AppTheme.primaryGreen)),
+              icon: const Icon(Icons.refresh_rounded, size: 16, color: Neo.blue),
+              label: Text('Actualiser', style: Neo.t(12, c: Neo.blue)),
             ),
             TextButton.icon(
               onPressed: () => ctrl.geocodeFailed.value = true,
-              icon: const Icon(Icons.edit_outlined, size: 16, color: AppTheme.greyMedium),
-              label: const Text('Ce n\'est pas ça',
-                  style: TextStyle(fontFamily: 'Poppins', fontSize: 12, color: AppTheme.greyMedium)),
+              icon: const Icon(Icons.edit_outlined, size: 16, color: Neo.muted),
+              label: Text("Ce n'est pas ça", style: Neo.t(12, c: Neo.muted)),
             ),
           ],
         ),
@@ -1247,107 +1239,45 @@ class _ManualLocationFallback extends StatelessWidget {
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
             onPressed: () => ctrl.locateMe(),
-            icon: const Icon(Icons.my_location_rounded, size: 16, color: AppTheme.primaryGreen),
-            label: const Text('Réessayer la détection automatique',
-                style: TextStyle(fontFamily: 'Poppins', fontSize: 12, color: AppTheme.primaryGreen)),
-            style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 0)),
+            icon: const Icon(Icons.my_location_rounded, size: 16, color: Neo.blue),
+            label: Text('Réessayer la détection automatique', style: Neo.t(12, c: Neo.blue)),
+            style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
           ),
         ),
         const SizedBox(height: 16),
 
-        const Text('Choisissez votre région',
-            style: TextStyle(fontFamily: 'Poppins', fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.darkBlue)),
+        Text('Choisissez votre région', style: Neo.t(14, w: FontWeight.w700)),
         const SizedBox(height: 10),
         Obx(() => Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: kSenegalRegions.map((r) {
-            final selected = ctrl.selectedRegion.value == r;
-            return GestureDetector(
-              onTap: () => ctrl.selectedRegion.value = r,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                decoration: BoxDecoration(
-                  color: selected ? AppTheme.primaryGreen : Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: selected ? AppTheme.primaryGreen : AppTheme.greyLight),
-                ),
-                child: Text(r,
-                    style: TextStyle(fontFamily: 'Poppins', fontSize: 13, fontWeight: FontWeight.w600, color: selected ? Colors.white : AppTheme.darkBlue)),
-              ),
-            );
-          }).toList(),
+          spacing: 10,
+          runSpacing: 10,
+          children: kSenegalRegions
+              .map((r) => NeoChip(
+            label: r,
+            selected: ctrl.selectedRegion.value == r,
+            onTap: () => ctrl.selectedRegion.value = r,
+          ))
+              .toList(),
         )),
 
         const SizedBox(height: 20),
-        const Text('Quartier ou commune',
-            style: TextStyle(fontFamily: 'Poppins', fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.darkBlue)),
+        Text('Quartier ou commune', style: Neo.t(14, w: FontWeight.w700)),
         const SizedBox(height: 10),
-        _SimpleField(
+        ReportNeoField(
           controller: ctrl.communeCtrl,
           hint: 'Ex: Parcelles Assainies',
           icon: Icons.location_city_outlined,
         ),
 
         const SizedBox(height: 20),
-        const Text('Repère (optionnel)',
-            style: TextStyle(fontFamily: 'Poppins', fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.darkBlue)),
+        Text('Repère (optionnel)', style: Neo.t(14, w: FontWeight.w700)),
         const SizedBox(height: 10),
-        _SimpleField(
+        ReportNeoField(
           controller: ctrl.addressCtrl,
           hint: 'Ex: près du marché',
           icon: Icons.signpost_outlined,
         ),
       ],
-    );
-  }
-}
-
-class _SimpleField extends StatelessWidget {
-  final TextEditingController controller;
-  final String hint;
-  final IconData icon;
-  final int maxLines;
-  const _SimpleField({required this.controller, required this.hint, required this.icon, this.maxLines = 1});
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      maxLines: maxLines,
-      style: const TextStyle(fontFamily: 'Poppins', fontSize: 15, color: AppTheme.darkBlue),
-      decoration: InputDecoration(
-        hintText: hint,
-        hintStyle: const TextStyle(fontFamily: 'Poppins', fontSize: 13, color: AppTheme.greyMedium),
-        prefixIcon: Icon(icon, size: 20, color: AppTheme.primaryGreen),
-        filled: true, fillColor: AppTheme.background,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppTheme.greyLight)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppTheme.greyLight)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppTheme.primaryGreen, width: 1.5)),
-      ),
-    );
-  }
-}
-
-class _BigErrorCard extends StatelessWidget {
-  final VoidCallback onRetry;
-  const _BigErrorCard({super.key, required this.onRetry});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.wifi_off_rounded, size: 56, color: AppTheme.greyMedium),
-          const SizedBox(height: 12),
-          const Text('Impossible de charger', style: TextStyle(fontFamily: 'Poppins', fontSize: 14, color: AppTheme.greyMedium)),
-          const SizedBox(height: 12),
-          ElevatedButton(onPressed: onRetry, child: const Text('Réessayer')),
-        ],
-      ),
     );
   }
 }

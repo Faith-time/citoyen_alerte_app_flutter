@@ -231,7 +231,6 @@ class AuthorityDashboardController extends GetxController {
   }
 
 
-
   Future<void> updateAgent({
     required int userId,
     required String name,
@@ -263,11 +262,11 @@ class AuthorityDashboardController extends GetxController {
   // ── HELPERS STATIQUES ────────────────────────────────────────────────────
 
   static Color statusColor(String s) => switch (s) {
-    'pending'     => Colors.orange,
-    'routed'      => Colors.blue,
-    'in_progress' => const Color(0xFF7B1FA2),
-    'resolved'    => Colors.green,
-    _             => Colors.grey,
+    'pending'     => AppTheme.warning,
+    'routed'      => AppTheme.primaryLight,
+    'in_progress' => AppTheme.purple,
+    'resolved'    => AppTheme.success,
+    _             => AppTheme.slate,
   };
 
   static String statusLabel(String s) => switch (s) {
@@ -279,10 +278,10 @@ class AuthorityDashboardController extends GetxController {
   };
 
   static Color severityColor(String s) => switch (s) {
-    'high'   => Colors.red,
-    'medium' => Colors.orange,
-    'low'    => Colors.green,
-    _        => Colors.grey,
+    'high'   => AppTheme.error,
+    'medium' => AppTheme.warning,
+    'low'    => AppTheme.success,
+    _        => AppTheme.slate,
   };
 
   static String severityLabel(String s) => switch (s) {
@@ -294,7 +293,7 @@ class AuthorityDashboardController extends GetxController {
 
   void _snackSuccess(String title, String msg) => Get.snackbar(
     title, msg,
-    backgroundColor: const Color(0xFF1565C0),
+    backgroundColor: AppTheme.primary,
     colorText: Colors.white,
     snackPosition: SnackPosition.BOTTOM,
     margin: const EdgeInsets.all(16),
@@ -303,11 +302,15 @@ class AuthorityDashboardController extends GetxController {
 
   void _snackError(String msg) => Get.snackbar(
     '❌ Erreur', msg,
-    backgroundColor: Colors.red[700],
+    backgroundColor: AppTheme.error[700],
     colorText: Colors.white,
     snackPosition: SnackPosition.BOTTOM,
     margin: const EdgeInsets.all(16),
   );
+}
+
+extension on Color {
+  Color? operator [](int other) {}
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -321,8 +324,8 @@ class AuthorityDashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final ctrl = Get.put(AuthorityDashboardController());
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F4F8),
-      body: Obx(() => IndexedStack(
+      backgroundColor: AppTheme.canvas,
+      body: SoftBackground(child: Obx(() => IndexedStack(
         index: ctrl.currentIndex.value,
         children: const [
           _AuthHomePage(),
@@ -330,7 +333,7 @@ class AuthorityDashboardScreen extends StatelessWidget {
           _AuthAgentsPage(),
           _AuthSettingsPage(),
         ],
-      )),
+      ))),
       bottomNavigationBar: Obx(() => _AuthBottomNav(
         currentIndex: ctrl.currentIndex.value,
         onTap: ctrl.changePage,
@@ -355,131 +358,43 @@ class _AuthBottomNav extends StatelessWidget {
     required this.pendingCount,
   });
 
-  static const _blue = Color(0xFF1565C0);
-
   @override
   Widget build(BuildContext context) {
-
-    final items = [
-      _NavDef(Icons.dashboard_outlined,  Icons.dashboard,     'Accueil',     0),
-      _NavDef(Icons.assignment_outlined, Icons.assignment,    'Signalements', pendingCount),
-      _NavDef(Icons.groups_outlined,     Icons.groups,        'Agents',      0),
-      _NavDef(Icons.settings_outlined,   Icons.settings,      'Paramètres',  0),
-    ];
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 20,
-              offset: const Offset(0, -4)),
-        ],
-      ),
-      child: SafeArea(
-        child: SizedBox(
-          height: 64,
-          child: Row(
-            children: List.generate(items.length, (i) {
-              final item   = items[i];
-              final active = currentIndex == i;
-              return Expanded(
-                child: GestureDetector(
-                  onTap: () => onTap(i),
-                  behavior: HitTestBehavior.opaque,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Stack(clipBehavior: Clip.none, children: [
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: active
-                                ? _blue.withOpacity(0.1)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Icon(
-                            active ? item.activeIcon : item.icon,
-                            color: active ? _blue : Colors.grey[400],
-                            size: 20,
-                          ),
-                        ),
-                        if (item.badge > 0)
-                          Positioned(
-                            top: -4, right: -4,
-                            child: Container(
-                              constraints:
-                              const BoxConstraints(minWidth: 16),
-                              height: 16,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.orange,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                    color: Colors.white, width: 1.5),
-                              ),
-                              child: Center(
-                                child: Text('${item.badge}',
-                                    style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.bold)),
-                              ),
-                            ),
-                          ),
-                      ]),
-                      const SizedBox(height: 2),
-                      Text(item.label,
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: active
-                                ? FontWeight.w700
-                                : FontWeight.w400,
-                            color: active ? _blue : Colors.grey[400],
-                          )),
-                    ],
-                  ),
-                ),
-              );
-            }),
-          ),
-        ),
-      ),
+    return NeuBottomNav(
+      currentIndex: currentIndex,
+      onTap: onTap,
+      items: [
+        const NavItem(Icons.home_outlined, Icons.home_rounded, 'Accueil'),
+        NavItem(Icons.assignment_outlined, Icons.assignment_rounded,
+            'Signalements',
+            badge: pendingCount),
+        const NavItem(Icons.groups_outlined, Icons.groups_rounded, 'Agents'),
+        const NavItem(
+            Icons.settings_outlined, Icons.settings_rounded, 'Paramètres'),
+      ],
     );
   }
-}
-
-class _NavDef {
-  final IconData icon, activeIcon;
-  final String label;
-  final int badge;
-  const _NavDef(this.icon, this.activeIcon, this.label, this.badge);
 }
 
 class _SH extends StatelessWidget {
   final String title;
   final IconData icon;
-  const _SH({required this.title, required this.icon});
+  final String? actionLabel;
+  final VoidCallback? onAction;
+  const _SH({
+    required this.title,
+    required this.icon,
+    this.actionLabel,
+    this.onAction,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Row(children: [
-      Icon(icon, size: 16, color: const Color(0xFF1565C0)),
-      const SizedBox(width: 8),
-      Text(
-        title,
-        style: const TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w700,
-          color: Color(0xFF1A1A2E),
-        ),
-      ),
-    ]);
+    return SectionTitle(
+      title: title,
+      actionLabel: actionLabel,
+      onAction: onAction,
+    );
   }
 }
 
@@ -494,7 +409,7 @@ class _AuthHomePage extends StatelessWidget {
     return Obx(() {
       if (ctrl.isLoadingDash.value && ctrl.totalAssigned.value == 0) {
         return const Center(
-            child: CircularProgressIndicator(color: Color(0xFF1565C0)));
+            child: CircularProgressIndicator(color: AppTheme.primary));
       }
       if (ctrl.dashError.isNotEmpty && ctrl.totalAssigned.value == 0) {
         return _ErrorState(onRetry: ctrl.refresh);
@@ -502,57 +417,71 @@ class _AuthHomePage extends StatelessWidget {
 
       return RefreshIndicator(
         onRefresh: ctrl.refresh,
-        color: const Color(0xFF1565C0),
+        color: AppTheme.primary,
         child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
-            SliverAppBar(
-              expandedHeight: 162,
-              pinned: true,
-              backgroundColor: const Color(0xFF0D47A1),
-              flexibleSpace:
-              FlexibleSpaceBar(background: _BlueHeader(ctrl: ctrl)),
+            SliverToBoxAdapter(
+              child: Obx(() => ScreenHeader(
+                    subtitleAbove: true,
+                    subtitle: 'Bonjour,',
+                    title: ctrl.authorityName.value.isNotEmpty
+                        ? ctrl.authorityName.value
+                        : 'Autorité',
+                    leading: Container(
+                      width: 50,
+                      height: 50,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                        boxShadow: AppTheme.neuShadow(depth: 0.6),
+                      ),
+                      child: const ShieldLogo(),
+                    ),
+                    trailing: NeuIconButton(
+                      icon: Icons.notifications_none_rounded,
+                      badge: ctrl.totalPending.value,
+                      onTap: () => ctrl.changePage(1),
+                    ),
+                  )),
             ),
             SliverPadding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
-                  // Alerte en attente
-                  Obx(() {
-                    final n = ctrl.totalPending.value;
-                    if (n == 0) return const SizedBox.shrink();
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 16),
-                      child: _PendingBanner(
-                          count: n, onTap: () => ctrl.changePage(1)),
-                    );
-                  }),
+                  Obx(() => _PendingBanner(
+                      count: ctrl.totalPending.value,
+                      onTap: () => ctrl.changePage(1))),
+                  const SizedBox(height: 18),
 
-                  // Carte chiffres du jour
                   Obx(() => _PeriodCard(
-                    totalAssigned: ctrl.totalAssigned.value,
-                    resolved:      ctrl.totalResolved.value,
-                    resolvedToday: ctrl.resolvedToday.value,
-                  )),
-                  const SizedBox(height: 20),
+                        totalAssigned: ctrl.totalAssigned.value,
+                        resolved: ctrl.totalResolved.value,
+                        resolvedToday: ctrl.resolvedToday.value,
+                      )),
+                  const SizedBox(height: 24),
 
-                  // Grille stats
                   const _SH(
-                      title: 'Vue d\'ensemble',
+                      title: "Vue d'ensemble",
                       icon: Icons.bar_chart_outlined),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
                   Obx(() => _StatsGrid(
-                    total:      ctrl.totalAssigned.value,
-                    pending:    ctrl.totalPending.value,
-                    inProgress: ctrl.totalInProgress.value,
-                    resolved:   ctrl.totalResolved.value,
-                  )),
-                  const SizedBox(height: 20),
+                        total: ctrl.totalAssigned.value,
+                        pending: ctrl.totalPending.value,
+                        inProgress: ctrl.totalInProgress.value,
+                        resolved: ctrl.totalResolved.value,
+                      )),
+                  const SizedBox(height: 24),
 
-                  // Activité récente
-                  const _SH(
-                      title: 'Activité récente',
-                      icon: Icons.history_outlined),
-                  const SizedBox(height: 10),
+                  _SH(
+                    title: 'Activité récente',
+                    icon: Icons.history_outlined,
+                    actionLabel: 'Tout voir',
+                    onAction: () => ctrl.changePage(1),
+                  ),
+                  const SizedBox(height: 12),
                   Obx(() {
                     final plain = List<Map<String, dynamic>>.from(
                         ctrl.recentRoutings.take(5));
@@ -568,7 +497,6 @@ class _AuthHomePage extends StatelessWidget {
                           .toList(),
                     );
                   }),
-                  const SizedBox(height: 40),
                 ]),
               ),
             ),
@@ -584,10 +512,10 @@ class _AuthRoutingPage extends StatelessWidget {
   const _AuthRoutingPage();
 
   static final List<Map<String, dynamic>> _authorityFilters = [
-    {'key': 'routed',      'label': 'En attente',  'color': Colors.blue},
-    {'key': 'in_progress', 'label': 'En cours',    'color': Color(0xFF7B1FA2)},
-    {'key': 'resolved',    'label': 'Résolus',     'color': Colors.green},
-    {'key': 'all',         'label': 'Tous',        'color': Colors.grey},
+    {'key': 'routed',      'label': 'En attente',  'color': AppTheme.primaryLight},
+    {'key': 'in_progress', 'label': 'En cours',    'color': AppTheme.purple},
+    {'key': 'resolved',    'label': 'Résolus',     'color': AppTheme.success},
+    {'key': 'all',         'label': 'Tous',        'color': AppTheme.slate},
   ];
   @override
   Widget build(BuildContext context) {
@@ -606,16 +534,16 @@ class _AuthRoutingPage extends StatelessWidget {
           if (isLoading) {
             return const Center(
                 child: CircularProgressIndicator(
-                    color: Color(0xFF1565C0)));
+                    color: AppTheme.primary));
           }
           if (list.isEmpty) {
             return _RoutingEmptyState(filter: filter);
           }
           return RefreshIndicator(
             onRefresh: ctrl.fetchRoutings,
-            color: const Color(0xFF1565C0),
+            color: AppTheme.primary,
             child: ListView.builder(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
               itemCount: list.length,
               itemBuilder: (_, i) => _RoutingCard(
                 routing:   list[i],
@@ -638,36 +566,12 @@ class _RoutingHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: const Color(0xFF0D47A1),
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(children: [
-            const Icon(
-              Icons.assignment,
-              color: Colors.white70,
-              size: 20,
-            ),
-            const SizedBox(width: 10),
-            const Expanded(
-              child: Text(
-                'Mes Signalements',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.refresh, color: Colors.white70),
-              onPressed: ctrl.fetchRoutings,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-            ),
-          ]),
-        ),
+    return ScreenHeader(
+      title: 'Mes signalements',
+      subtitle: 'Signalements transmis à votre autorité',
+      trailing: NeuIconButton(
+        icon: Icons.refresh_rounded,
+        onTap: ctrl.fetchRoutings,
       ),
     );
   }
@@ -690,66 +594,25 @@ class _RoutingFilterBar extends StatelessWidget {
       for (final f in filters) {
         final k = f['key'] as String;
         counts[k] =
-        k == 'all' ? ctrl.allRoutings.length : ctrl.countByStatus(k);
+            k == 'all' ? ctrl.allRoutings.length : ctrl.countByStatus(k);
       }
 
-      return Container(
-        height: 52,
-        color: const Color(0xFF0D47A1),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      return SizedBox(
+        height: 56,
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(20, 6, 20, 12),
           itemCount: filters.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 6),
+          separatorBuilder: (_, __) => const SizedBox(width: 10),
           itemBuilder: (_, i) {
-            final f     = filters[i];
-            final key   = f['key'] as String;
-            final label = f['label'] as String;
-            final color = (f['color'] as Color?) ?? Colors.grey;            final active = activeFilter == key;
-            final count  = counts[key] ?? 0;
-
-            return GestureDetector(
+            final f = filters[i];
+            final key = f['key'] as String;
+            return PillChip(
+              label: f['label'] as String,
+              count: counts[key] ?? 0,
+              color: (f['color'] as Color?) ?? AppTheme.primary,
+              active: activeFilter == key,
               onTap: () => ctrl.routingFilter.value = key,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                decoration: BoxDecoration(
-                  color: active
-                      ? Colors.white
-                      : Colors.white.withOpacity(0.18),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Text(label,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: active
-                            ? const Color(0xFF1565C0)
-                            : Colors.white,
-                      )),
-                  const SizedBox(width: 5),
-                  Container(
-                    constraints: const BoxConstraints(minWidth: 18),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 4, vertical: 1),
-                    decoration: BoxDecoration(
-                      color: active
-                          ? color.withOpacity(0.15)
-                          : Colors.white.withOpacity(0.25),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text('$count',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold,
-                          color: active ? color : Colors.white,
-                        )),
-                  ),
-                ]),
-              ),
             );
           },
         ),
@@ -766,28 +629,14 @@ class _RoutingEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isWaiting = filter == 'routed';
-
-    String message;
-    String sub;
-    if (isWaiting) {
-      message = 'Aucun signalement en attente';
-      sub = 'Tous vos signalements ont été traités';
-    } else {
-      message = 'Aucun signalement ici';
-      sub = "Changez le filtre pour voir d'autres";
-    }
-
-    return Center(
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Icon(Icons.check_circle_outline, size: 72, color: Colors.grey[200]),
-        const SizedBox(height: 14),
-        Text(message,
-            style: TextStyle(
-                color: Colors.grey[500], fontWeight: FontWeight.w600)),
-        const SizedBox(height: 6),
-        Text(sub,
-            style: TextStyle(color: Colors.grey[400], fontSize: 12)),
-      ]),
+    return EmptyState(
+      icon: Icons.check_circle_outline_rounded,
+      title: isWaiting
+          ? 'Aucun signalement en attente'
+          : 'Aucun signalement ici',
+      message: isWaiting
+          ? 'Tous vos signalements ont été traités'
+          : "Changez le filtre pour voir d'autres signalements",
     );
   }
 }
@@ -830,37 +679,20 @@ class _RoutingCard extends StatelessWidget {
     final statusClr = AuthorityDashboardController.statusColor(status);
     final sevClr    = AuthorityDashboardController.severityColor(severity);
 
-    Border? cardBorder;
-    if (isRouted) {
-      cardBorder =
-          Border.all(color: Colors.blue.withOpacity(0.4), width: 1.5);
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: cardBorder,
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 3))
-        ],
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: NeuCard(
+        padding: EdgeInsets.zero,
+        radius: 22,
+        depth: 0.8,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
         // ── Infos principales ─────────────────────────────────────
         Padding(
           padding: const EdgeInsets.all(14),
           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Container(
-              width: 4,
-              height: 65,
-              decoration: BoxDecoration(
-                  color: sevClr, borderRadius: BorderRadius.circular(2)),
-            ),
+            BrickIcon(
+                icon: Icons.assignment_outlined, color: sevClr, size: 48),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -870,9 +702,10 @@ class _RoutingCard extends StatelessWidget {
                       Expanded(
                         child: Text(title,
                             style: const TextStyle(
+                                fontFamily: AppTheme.fontFamily,
                                 fontWeight: FontWeight.w700,
-                                fontSize: 13,
-                                color: Color(0xFF1A1A2E)),
+                                fontSize: 13.5,
+                                color: AppTheme.navy),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis),
                       ),
@@ -884,35 +717,35 @@ class _RoutingCard extends StatelessWidget {
                     ]),
                     const SizedBox(height: 5),
                     Row(children: [
-                      Icon(Icons.location_on_outlined,
-                          size: 12, color: Colors.grey[500]),
-                      const SizedBox(width: 3),
+                      const Icon(Icons.location_on_outlined,
+                          size: 13, color: AppTheme.slate),
+                      const SizedBox(width: 4),
                       Expanded(
                         child: Text(
                           commune.isNotEmpty ? '$commune · $ref' : ref,
-                          style: TextStyle(
-                              fontSize: 11, color: Colors.grey[500]),
+                          style: const TextStyle(
+                              fontSize: 11, color: AppTheme.slate),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ]),
                     const SizedBox(height: 4),
                     Row(children: [
-                      Icon(Icons.label_outline,
-                          size: 12, color: Colors.grey[500]),
-                      const SizedBox(width: 3),
+                      const Icon(Icons.label_outline,
+                          size: 13, color: AppTheme.slate),
+                      const SizedBox(width: 4),
                       Expanded(
                         child: Text(category,
-                            style: TextStyle(
-                                fontSize: 11, color: Colors.grey[500]),
+                            style: const TextStyle(
+                                fontSize: 11, color: AppTheme.slate),
                             overflow: TextOverflow.ellipsis),
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                            horizontal: 8, vertical: 2),
                         decoration: BoxDecoration(
-                            color: sevClr.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(6)),
+                            color: sevClr.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(10)),
                         child: Text(
                           AuthorityDashboardController.severityLabel(severity),
                           style: TextStyle(
@@ -925,12 +758,14 @@ class _RoutingCard extends StatelessWidget {
                     if (routedAt != null) ...[
                       const SizedBox(height: 4),
                       Row(children: [
-                        Icon(Icons.access_time,
-                            size: 11, color: Colors.grey[400]),
-                        const SizedBox(width: 3),
+                        Icon(Icons.access_time_rounded,
+                            size: 12,
+                            color: AppTheme.slate.withOpacity(0.7)),
+                        const SizedBox(width: 4),
                         Text('Reçu le ${_formatDate(routedAt)}',
                             style: TextStyle(
-                                fontSize: 10, color: Colors.grey[400])),
+                                fontSize: 10,
+                                color: AppTheme.slate.withOpacity(0.7))),
                       ]),
                     ],
                   ]),
@@ -944,7 +779,7 @@ class _RoutingCard extends StatelessWidget {
         if (isRouted || isInProg) ...[
           Container(
               height: 1,
-              color: Colors.grey.withOpacity(0.08),
+              color: AppTheme.mist,
               margin: const EdgeInsets.symmetric(horizontal: 14)),
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
@@ -956,7 +791,7 @@ class _RoutingCard extends StatelessWidget {
                     _ActionButton(
                       label: 'Prendre en charge',
                       icon: Icons.play_arrow_outlined,
-                      color: const Color(0xFF7B1FA2),
+                      color: AppTheme.purple,
                       onTap: () => ctrl.updateRoutingStatus(
                           routingId, reportId, 'in_progress'),
                     ),
@@ -964,7 +799,7 @@ class _RoutingCard extends StatelessWidget {
                     _ActionButton(
                       label: 'Marquer résolu',
                       icon: Icons.check_circle_outline,
-                      color: Colors.green,
+                      color: AppTheme.success,
                       onTap: () => ctrl.updateRoutingStatus(
                           routingId, reportId, 'resolved'),
                     ),
@@ -975,17 +810,17 @@ class _RoutingCard extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(5),
                       decoration: BoxDecoration(
-                          color: const Color(0xFF1565C0).withOpacity(0.1),
+                          color: AppTheme.primary.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(6)),
                       child: const Icon(Icons.person_add_outlined,
-                          size: 14, color: Color(0xFF1565C0)),
+                          size: 14, color: AppTheme.primary),
                     ),
                     const SizedBox(width: 7),
                     const Text('Assigner à un agent',
                         style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
-                            color: Color(0xFF1A1A2E))),
+                            color: AppTheme.navy)),
                   ]),
                   const SizedBox(height: 8),
                   if (available.isEmpty)
@@ -1004,19 +839,19 @@ class _RoutingCard extends StatelessWidget {
         if (status == 'resolved') ...[
           Container(
               height: 1,
-              color: Colors.grey.withOpacity(0.08),
+              color: AppTheme.mist,
               margin: const EdgeInsets.symmetric(horizontal: 14)),
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
             child: Row(children: [
               const Icon(Icons.check_circle,
-                  color: Colors.green, size: 13),
+                  color: AppTheme.success, size: 13),
               const SizedBox(width: 5),
               Text(
                 'Résolu le ${_formatDate(routing['resolved_at'])}',
                 style: const TextStyle(
                     fontSize: 11,
-                    color: Colors.green,
+                    color: AppTheme.success,
                     fontWeight: FontWeight.w600),
               ),
             ]),
@@ -1024,6 +859,7 @@ class _RoutingCard extends StatelessWidget {
         ],
 
       ]),
+      ),
     );
   }
 
@@ -1083,11 +919,11 @@ class _AgentMultiSelectChipsState extends State<_AgentMultiSelectChips> {
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: isSelected
-                      ? const Color(0xFF1565C0)
-                      : const Color(0xFF1565C0).withOpacity(0.06),
+                      ? AppTheme.primary
+                      : AppTheme.primary.withOpacity(0.06),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: const Color(0xFF1565C0).withOpacity(isSelected ? 1 : 0.25),
+                    color: AppTheme.primary.withOpacity(isSelected ? 1 : 0.25),
                     width: isSelected ? 1.5 : 1,
                   ),
                 ),
@@ -1097,14 +933,14 @@ class _AgentMultiSelectChipsState extends State<_AgentMultiSelectChips> {
                     Icon(
                       isSelected ? Icons.check_circle : Icons.person_outline,
                       size: 14,
-                      color: isSelected ? Colors.white : const Color(0xFF1565C0),
+                      color: isSelected ? Colors.white : AppTheme.primary,
                     ),
                     const SizedBox(width: 5),
                     Text(aName,
                         style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
-                            color: isSelected ? Colors.white : const Color(0xFF1565C0))),
+                            color: isSelected ? Colors.white : AppTheme.primary)),
                   ],
                 ),
               ),
@@ -1121,7 +957,7 @@ class _AgentMultiSelectChipsState extends State<_AgentMultiSelectChips> {
               label: Text('Assigner (${_selected.length})',
                   style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white)),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1565C0),
+                backgroundColor: AppTheme.primary,
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
@@ -1157,9 +993,9 @@ class _AgentMultiSelectChipsState extends State<_AgentMultiSelectChips> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                    color: const Color(0xFF1565C0).withOpacity(0.08),
+                    color: AppTheme.primary.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.groups, color: Color(0xFF1565C0), size: 20),
+                child: const Icon(Icons.groups, color: AppTheme.primary, size: 20),
               ),
               const SizedBox(width: 10),
               Text('Assigner ${_selected.length} agent${_selected.length > 1 ? "s" : ""}',
@@ -1169,7 +1005,7 @@ class _AgentMultiSelectChipsState extends State<_AgentMultiSelectChips> {
             ...selectedNames.map((n) => Padding(
               padding: const EdgeInsets.symmetric(vertical: 3),
               child: Row(children: [
-                const Icon(Icons.person, size: 14, color: Color(0xFF1565C0)),
+                const Icon(Icons.person, size: 14, color: AppTheme.primary),
                 const SizedBox(width: 6),
                 Text(n, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
               ]),
@@ -1198,7 +1034,7 @@ class _AgentMultiSelectChipsState extends State<_AgentMultiSelectChips> {
                     setState(() => _selected.clear());
                   },
                   style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1565C0),
+                      backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                   child: const Text('Confirmer'),
@@ -1224,41 +1060,35 @@ class _AuthAgentsPage extends StatelessWidget {
     final ctrl = Get.find<AuthorityDashboardController>();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F4F8),
+      backgroundColor: Colors.transparent,
       body: CustomScrollView(slivers: [
-        SliverAppBar(
-          pinned: true,
-          backgroundColor: const Color(0xFF0D47A1),
-          title: const Text('Mes Agents',
-              style: TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.bold)),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.person_add, color: Colors.white),
-              onPressed: () => _showAddAgentDialog(context, ctrl),
-              tooltip: 'Ajouter un agent',
+        SliverToBoxAdapter(
+          child: ScreenHeader(
+            title: 'Mes agents',
+            subtitle: 'Gérez les agents de terrain',
+            trailing: NeuIconButton(
+              icon: Icons.person_add_alt_1_rounded,
+              onTap: () => _showAddAgentDialog(context, ctrl),
             ),
-          ],
+          ),
         ),
 
-        // Bandeau stats agents
+        // Bande de stats agents
         SliverToBoxAdapter(
-          child: Obx(() {
-            final total     = ctrl.agents.length;
-            final available = ctrl.availableAgents.length;
-            final busy      = total - available;
-            return Container(
-              color: const Color(0xFF0D47A1),
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: Row(children: [
-                _AgentStatBadge('Total',       '$total',     Colors.white),
-                const SizedBox(width: 8),
-                _AgentStatBadge('Disponibles', '$available', Colors.greenAccent),
-                const SizedBox(width: 8),
-                _AgentStatBadge('Occupés',     '$busy',      Colors.orangeAccent),
-              ]),
-            );
-          }),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 14),
+            child: Obx(() {
+              final total = ctrl.agents.length;
+              final available = ctrl.availableAgents.length;
+              final busy = total - available;
+              return StatsStrip(stats: [
+                StripStat('$total', 'Total'),
+                StripStat('$available', 'Disponibles',
+                    color: AppTheme.success),
+                StripStat('$busy', 'Occupés', color: AppTheme.warning),
+              ]);
+            }),
+          ),
         ),
 
         Obx(() {
@@ -1266,7 +1096,7 @@ class _AuthAgentsPage extends StatelessWidget {
             return const SliverFillRemaining(
               child: Center(
                   child: CircularProgressIndicator(
-                      color: Color(0xFF1565C0))),
+                      color: AppTheme.primary)),
             );
           }
           final list = ctrl.agents;
@@ -1277,7 +1107,7 @@ class _AuthAgentsPage extends StatelessWidget {
             );
           }
           return SliverPadding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 90),
             sliver: SliverList(
               delegate: SliverChildBuilderDelegate(
                     (_, i) => _AgentCard(agent: list[i], rank: i + 1),
@@ -1289,7 +1119,7 @@ class _AuthAgentsPage extends StatelessWidget {
       ]),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showAddAgentDialog(context, ctrl),
-        backgroundColor: const Color(0xFF1565C0),
+        backgroundColor: AppTheme.primary,
         icon: const Icon(Icons.person_add, color: Colors.white),
         label: const Text('Ajouter un agent',
             style: TextStyle(
@@ -1324,10 +1154,10 @@ class _AuthAgentsPage extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                        color: const Color(0xFF1565C0).withOpacity(0.08),
+                        color: AppTheme.primary.withOpacity(0.08),
                         borderRadius: BorderRadius.circular(10)),
                     child: const Icon(Icons.person_add,
-                        color: Color(0xFF1565C0), size: 20),
+                        color: AppTheme.primary, size: 20),
                   ),
                   const SizedBox(width: 10),
                   const Text('Nouvel agent',
@@ -1337,7 +1167,7 @@ class _AuthAgentsPage extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text('Crée un compte avec le rôle Agent',
                     style:
-                    TextStyle(fontSize: 11, color: Colors.grey[500])),
+                    TextStyle(fontSize: 11, color: AppTheme.slate)),
                 const SizedBox(height: 18),
 
                 if (errorMsg.isNotEmpty)
@@ -1345,18 +1175,18 @@ class _AuthAgentsPage extends StatelessWidget {
                     margin: const EdgeInsets.only(bottom: 12),
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.08),
+                        color: AppTheme.error.withOpacity(0.08),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                            color: Colors.red.withOpacity(0.3))),
+                            color: AppTheme.error.withOpacity(0.3))),
                     child: Row(children: [
                       const Icon(Icons.error_outline,
-                          color: Colors.red, size: 14),
+                          color: AppTheme.error, size: 14),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(errorMsg.value,
                             style: const TextStyle(
-                                fontSize: 11, color: Colors.red)),
+                                fontSize: 11, color: AppTheme.error)),
                       ),
                     ]),
                   ),
@@ -1426,7 +1256,7 @@ class _AuthAgentsPage extends StatelessWidget {
                         }
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF1565C0),
+                        backgroundColor: AppTheme.primary,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10)),
@@ -1466,20 +1296,12 @@ class _AgentCard extends StatelessWidget {
     final isAvail = count == 0;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-            color: isAvail
-                ? Colors.green.withOpacity(0.3)
-                : Colors.orange.withOpacity(0.3)),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 2))
-        ],
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white, width: 1),
+        boxShadow: AppTheme.neuShadow(depth: 0.8),
       ),
       child: Column(children: [
         // ── Infos agent ──────────────────────────────────────────
@@ -1489,11 +1311,11 @@ class _AgentCard extends StatelessWidget {
             Stack(children: [
               CircleAvatar(
                 radius: 26,
-                backgroundColor: const Color(0xFF1565C0).withOpacity(0.1),
+                backgroundColor: AppTheme.primary.withOpacity(0.1),
                 child: Text(
                   name.isNotEmpty ? name[0].toUpperCase() : 'A',
                   style: const TextStyle(
-                      color: Color(0xFF1565C0),
+                      color: AppTheme.primary,
                       fontWeight: FontWeight.bold,
                       fontSize: 18),
                 ),
@@ -1503,7 +1325,7 @@ class _AgentCard extends StatelessWidget {
                 child: Container(
                   width: 12, height: 12,
                   decoration: BoxDecoration(
-                    color: isAvail ? Colors.green : Colors.orange,
+                    color: isAvail ? AppTheme.success : AppTheme.warning,
                     shape: BoxShape.circle,
                     border: Border.all(color: Colors.white, width: 2),
                   ),
@@ -1519,23 +1341,23 @@ class _AgentCard extends StatelessWidget {
                         style: const TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 14,
-                            color: Color(0xFF1A1A2E))),
+                            color: AppTheme.navy)),
                     const SizedBox(height: 2),
                     Text(email,
-                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                        style: TextStyle(fontSize: 11, color: AppTheme.slate),
                         overflow: TextOverflow.ellipsis),
                     if (phone.isNotEmpty) ...[
                       const SizedBox(height: 1),
                       Text(phone,
-                          style: TextStyle(fontSize: 11, color: Colors.grey[400])),
+                          style: TextStyle(fontSize: 11, color: AppTheme.slate.withOpacity(0.7))),
                     ],
                     const SizedBox(height: 6),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
                         color: isAvail
-                            ? Colors.green.withOpacity(0.1)
-                            : Colors.orange.withOpacity(0.1),
+                            ? AppTheme.success.withOpacity(0.1)
+                            : AppTheme.warning.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
@@ -1545,7 +1367,7 @@ class _AgentCard extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
-                          color: isAvail ? Colors.green : Colors.orange,
+                          color: isAvail ? AppTheme.success : AppTheme.warning,
                         ),
                       ),
                     ),
@@ -1554,12 +1376,12 @@ class _AgentCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
               decoration: BoxDecoration(
-                  color: const Color(0xFF1565C0).withOpacity(0.08),
+                  color: AppTheme.primary.withOpacity(0.08),
                   borderRadius: BorderRadius.circular(8)),
               child: const Text('Agent',
                   style: TextStyle(
                       fontSize: 10,
-                      color: Color(0xFF1565C0),
+                      color: AppTheme.primary,
                       fontWeight: FontWeight.w700)),
             ),
           ]),
@@ -1568,7 +1390,7 @@ class _AgentCard extends StatelessWidget {
         // ── Actions ──────────────────────────────────────────────
         Container(
           height: 1,
-          color: Colors.grey.withOpacity(0.08),
+          color: AppTheme.slate.withOpacity(0.08),
           margin: const EdgeInsets.symmetric(horizontal: 16),
         ),
         Padding(
@@ -1578,7 +1400,7 @@ class _AgentCard extends StatelessWidget {
             _AgentAction(
               icon: Icons.visibility_outlined,
               label: 'Détails',
-              color: const Color(0xFF1565C0),
+              color: AppTheme.primary,
               onTap: () => _showDetailDialog(context, ad, count),
             ),
             const SizedBox(width: 8),
@@ -1586,7 +1408,7 @@ class _AgentCard extends StatelessWidget {
             _AgentAction(
               icon: Icons.edit_outlined,
               label: 'Modifier',
-              color: Colors.orange,
+              color: AppTheme.warning,
               onTap: () => _showEditDialog(context, ctrl, userId, name, email, phone),
             ),
             const SizedBox(width: 8),
@@ -1594,7 +1416,7 @@ class _AgentCard extends StatelessWidget {
             _AgentAction(
               icon: Icons.delete_outline,
               label: 'Supprimer',
-              color: Colors.red,
+              color: AppTheme.error,
               onTap: () => _confirmDelete(context, ctrl, userId, name),
             ),
           ]),
@@ -1616,30 +1438,30 @@ class _AgentCard extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           CircleAvatar(
             radius: 36,
-            backgroundColor: const Color(0xFF1565C0).withOpacity(0.1),
+            backgroundColor: AppTheme.primary.withOpacity(0.1),
             child: Text(
               name.isNotEmpty ? name[0].toUpperCase() : 'A',
               style: const TextStyle(
                   fontSize: 28, fontWeight: FontWeight.bold,
-                  color: Color(0xFF1565C0)),
+                  color: AppTheme.primary),
             ),
           ),
           const SizedBox(height: 12),
           Text(name,
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold,
-                  color: Color(0xFF1A1A2E))),
+                  color: AppTheme.navy)),
           const SizedBox(height: 4),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: isAvail ? Colors.green.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+              color: isAvail ? AppTheme.success.withOpacity(0.1) : AppTheme.warning.withOpacity(0.1),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
               isAvail ? 'Disponible' : '$count intervention(s) en cours',
               style: TextStyle(
                   fontSize: 11, fontWeight: FontWeight.w600,
-                  color: isAvail ? Colors.green : Colors.orange),
+                  color: isAvail ? AppTheme.success : AppTheme.warning),
             ),
           ),
           const SizedBox(height: 20),
@@ -1654,7 +1476,7 @@ class _AgentCard extends StatelessWidget {
             child: ElevatedButton(
               onPressed: () => Get.back(),
               style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1565C0),
+                  backgroundColor: AppTheme.primary,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10))),
@@ -1690,9 +1512,9 @@ class _AgentCard extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                        color: Colors.orange.withOpacity(0.08),
+                        color: AppTheme.warning.withOpacity(0.08),
                         borderRadius: BorderRadius.circular(10)),
-                    child: const Icon(Icons.edit, color: Colors.orange, size: 20),
+                    child: const Icon(Icons.edit, color: AppTheme.warning, size: 20),
                   ),
                   const SizedBox(width: 10),
                   const Text('Modifier l\'agent',
@@ -1704,11 +1526,11 @@ class _AgentCard extends StatelessWidget {
                     margin: const EdgeInsets.only(bottom: 12),
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.08),
+                        color: AppTheme.error.withOpacity(0.08),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.red.withOpacity(0.3))),
+                        border: Border.all(color: AppTheme.error.withOpacity(0.3))),
                     child: Text(errorMsg.value,
-                        style: const TextStyle(fontSize: 11, color: Colors.red)),
+                        style: const TextStyle(fontSize: 11, color: AppTheme.error)),
                   ),
                 _FormField(
                     controller: nameCtrl,
@@ -1758,7 +1580,7 @@ class _AgentCard extends StatelessWidget {
                         }
                       },
                       style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
+                          backgroundColor: AppTheme.warning,
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10))),
@@ -1785,9 +1607,9 @@ class _AgentCard extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-              color: Colors.red.withOpacity(0.08),
+              color: AppTheme.error.withOpacity(0.08),
               borderRadius: BorderRadius.circular(10)),
-          child: const Icon(Icons.delete, color: Colors.red, size: 20),
+          child: const Icon(Icons.delete, color: AppTheme.error, size: 20),
         ),
         const SizedBox(width: 10),
         const Text('Supprimer l\'agent',
@@ -1795,7 +1617,7 @@ class _AgentCard extends StatelessWidget {
       ]),
       content: RichText(
         text: TextSpan(
-          style: const TextStyle(fontSize: 13, color: Color(0xFF1A1A2E)),
+          style: const TextStyle(fontSize: 13, color: AppTheme.navy),
           children: [
             const TextSpan(text: 'Voulez-vous vraiment supprimer '),
             TextSpan(text: name,
@@ -1814,7 +1636,7 @@ class _AgentCard extends StatelessWidget {
             ctrl.deleteAgent(userId, name);
           },
           style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
+              backgroundColor: AppTheme.error,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10))),
@@ -1873,17 +1695,17 @@ class _DetailRow extends StatelessWidget {
       Container(
         padding: const EdgeInsets.all(7),
         decoration: BoxDecoration(
-            color: const Color(0xFF1565C0).withOpacity(0.08),
+            color: AppTheme.primary.withOpacity(0.08),
             borderRadius: BorderRadius.circular(8)),
-        child: Icon(icon, size: 14, color: const Color(0xFF1565C0)),
+        child: Icon(icon, size: 14, color: AppTheme.primary),
       ),
       const SizedBox(width: 10),
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(label,
-            style: TextStyle(fontSize: 10, color: Colors.grey[500])),
+            style: TextStyle(fontSize: 10, color: AppTheme.slate)),
         Text(value,
             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                color: Color(0xFF1A1A2E))),
+                color: AppTheme.navy)),
       ]),
     ]);
   }
@@ -1901,91 +1723,72 @@ class _AuthSettingsPage extends StatelessWidget {
     final ctrl = Get.find<AuthorityDashboardController>();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F4F8),
+      backgroundColor: Colors.transparent,
       body: CustomScrollView(slivers: [
-        SliverAppBar(
-          expandedHeight: 220,
-          pinned: true,
-          backgroundColor: const Color(0xFF0D47A1),
-          flexibleSpace: FlexibleSpaceBar(
-            background: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFF0A2D6E), Color(0xFF1565C0)],
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
+        SliverToBoxAdapter(
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 26, 20, 12),
+              child: Column(children: [
+                Container(
+                  width: 98,
+                  height: 98,
+                  padding: const EdgeInsets.all(22),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 3),
+                    boxShadow: AppTheme.neuShadow(depth: 1.1),
+                  ),
+                  child: const ShieldLogo(),
                 ),
-              ),
-              child: SafeArea(
-                child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const SizedBox(height: 16),
-                      Container(
-                        width: 80, height: 80,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                              color: Colors.white.withOpacity(0.4),
-                              width: 2),
-                        ),
-                        child: const Icon(
-                          Icons.account_balance,
-                          color: Colors.white,
-                          size: 38,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Obx(() => Text(
-                        ctrl.authorityName.value.isNotEmpty
-                            ? ctrl.authorityName.value
-                            : (auth.userName.value ?? 'Autorité'),
+                const SizedBox(height: 14),
+                Obx(() => Text(
+                      ctrl.authorityName.value.isNotEmpty
+                          ? ctrl.authorityName.value
+                          : (auth.userName.value ?? 'Autorité'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          fontFamily: AppTheme.fontFamily,
+                          color: AppTheme.navy,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700),
+                    )),
+                const SizedBox(height: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                  decoration: BoxDecoration(
+                      color: AppTheme.primary.withOpacity(0.10),
+                      borderRadius: BorderRadius.circular(14)),
+                  child: Obx(() => Text(
+                        ctrl.authorityType.value.isNotEmpty
+                            ? ctrl.authorityType.value
+                            : 'Autorité compétente',
                         style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold),
+                            fontFamily: AppTheme.fontFamily,
+                            color: AppTheme.primary,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600),
                       )),
-                      const SizedBox(height: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 4),
-                        decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(12)),
-                        child: Obx(() => Text(
-                          ctrl.authorityType.value.isNotEmpty
-                              ? ctrl.authorityType.value
-                              : 'Autorité compétente',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500),
-                        )),
-                      ),
-                    ]),
-              ),
+                ),
+              ]),
             ),
           ),
         ),
 
         SliverPadding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
           sliver: SliverList(
             delegate: SliverChildListDelegate([
-              Obx(() => Row(children: [
-                Expanded(
-                    child: _MiniStat('Total',
-                        '${ctrl.totalAssigned.value}', Colors.blue)),
-                const SizedBox(width: 10),
-                Expanded(
-                    child: _MiniStat('En cours',
-                        '${ctrl.totalInProgress.value}', Colors.purple)),
-                const SizedBox(width: 10),
-                Expanded(
-                    child: _MiniStat('Résolus',
-                        '${ctrl.totalResolved.value}', Colors.green)),
-              ])),
+              Obx(() => StatsStrip(stats: [
+                    StripStat('${ctrl.totalAssigned.value}', 'Total'),
+                    StripStat('${ctrl.totalInProgress.value}', 'En cours',
+                        color: AppTheme.purple),
+                    StripStat('${ctrl.totalResolved.value}', 'Résolus',
+                        color: AppTheme.success),
+                  ])),
               const SizedBox(height: 20),
 
               _SettingsSection(title: 'Mon compte', items: [
@@ -2070,7 +1873,7 @@ class _AuthSettingsPage extends StatelessWidget {
                         ElevatedButton(
                           onPressed: () => Get.back(result: true),
                           style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
+                              backgroundColor: AppTheme.error,
                               foregroundColor: Colors.white),
                           child: const Text('Déconnecter'),
                         ),
@@ -2081,17 +1884,21 @@ class _AuthSettingsPage extends StatelessWidget {
                       Get.offAllNamed(Routes.SPLASH);
                     }
                   },
-                  icon: const Icon(Icons.logout, color: Colors.red),
+                  icon: const Icon(Icons.logout, color: AppTheme.error),
                   label: const Text('Se déconnecter',
                       style: TextStyle(
-                          color: Colors.red,
+                          color: AppTheme.error,
                           fontWeight: FontWeight.w600)),
                   style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: Colors.red),
+                    side: BorderSide(
+                        color: AppTheme.error.withOpacity(0.30)),
+                    backgroundColor: Colors.white,
+                    elevation: 3,
+                    shadowColor: AppTheme.error.withOpacity(0.25),
                     padding:
-                    const EdgeInsets.symmetric(vertical: 14),
+                    const EdgeInsets.symmetric(vertical: 15),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+                        borderRadius: BorderRadius.circular(18)),
                   ),
                 ),
               ),
@@ -2108,91 +1915,6 @@ class _AuthSettingsPage extends StatelessWidget {
 //  WIDGETS RÉUTILISABLES
 // ════════════════════════════════════════════════════════════════════════════
 
-class _BlueHeader extends StatelessWidget {
-  final AuthorityDashboardController ctrl;
-  const _BlueHeader({required this.ctrl});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFF0A2D6E), Color(0xFF0D47A1), Color(0xFF1565C0)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-          child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 8),
-                Row(children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(12)),
-                    child: const Icon(
-                      Icons.account_balance_outlined,
-                      color: Colors.white,
-                      size: 22,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Obx(() => Text(
-                            ctrl.authorityName.value.isNotEmpty
-                                ? ctrl.authorityName.value
-                                : 'Autorité',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold),
-                          )),
-                          Obx(() => Text(
-                            ctrl.authorityType.value.isNotEmpty
-                                ? ctrl.authorityType.value
-                                : 'Tableau de bord',
-                            style: TextStyle(
-                                color: Colors.white.withOpacity(0.7),
-                                fontSize: 11),
-                          )),
-                        ]),
-                  ),
-                  Obx(() => Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(20)),
-                    child: Row(children: [
-                      const Icon(
-                        Icons.assignment,
-                        color: Colors.white,
-                        size: 14,
-                      ),
-                      const SizedBox(width: 5),
-                      Text('${ctrl.totalAssigned.value}',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13)),
-                    ]),
-                  )),
-                ]),
-              ]),
-        ),
-      ),
-    );
-  }
-}
-
 class _PendingBanner extends StatelessWidget {
   final int count;
   final VoidCallback onTap;
@@ -2200,51 +1922,17 @@ class _PendingBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    final has = count > 0;
+    return HeroBanner(
+      icon: has ? Icons.pending_actions_rounded : Icons.verified_outlined,
+      title: has
+          ? '$count signalement${count > 1 ? 's' : ''} en attente'
+          : 'Tout est à jour',
+      subtitle: has
+          ? 'Prenez-les en charge dès maintenant !'
+          : 'Aucun signalement en attente',
+      buttonLabel: has ? 'Traiter les signalements' : 'Voir les signalements',
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-              colors: [Colors.orange, Color(0xFFFF8C00)]),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-                color: Colors.orange.withOpacity(0.3),
-                blurRadius: 12,
-                offset: const Offset(0, 4))
-          ],
-        ),
-        child: Row(children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
-                shape: BoxShape.circle),
-            child: const Icon(Icons.pending_actions,
-                color: Colors.white, size: 22),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '$count signalement${count > 1 ? 's' : ''} en attente',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14),
-                  ),
-                  const Text('Toucher pour les traiter',
-                      style: TextStyle(
-                          color: Colors.white70, fontSize: 11)),
-                ]),
-          ),
-          const Icon(Icons.arrow_forward_ios,
-              color: Colors.white70, size: 14),
-        ]),
-      ),
     );
   }
 }
@@ -2259,59 +1947,11 @@ class _PeriodCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-            colors: [Color(0xFF0A2D6E), Color(0xFF1565C0)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-              color: const Color(0xFF1565C0).withOpacity(0.3),
-              blurRadius: 15,
-              offset: const Offset(0, 6))
-        ],
-      ),
-      child: Row(children: [
-        _PStat('Reçus', '$totalAssigned', Icons.assignment_outlined),
-        Container(width: 1, height: 50,
-            color: Colors.white.withOpacity(0.25),
-            margin: const EdgeInsets.symmetric(horizontal: 8)),
-        _PStat('Résolus', '$resolved', Icons.check_circle_outline),
-        Container(width: 1, height: 50,
-            color: Colors.white.withOpacity(0.25),
-            margin: const EdgeInsets.symmetric(horizontal: 8)),
-        _PStat("Aujourd'hui", '$resolvedToday', Icons.today_outlined),
-      ]),
-    );
-  }
-}
-
-class _PStat extends StatelessWidget {
-  final String label, value;
-  final IconData icon;
-  const _PStat(this.label, this.value, this.icon);
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Column(children: [
-        Icon(icon, color: Colors.white70, size: 18),
-        const SizedBox(height: 4),
-        Text(value,
-            style: const TextStyle(
-                color: Colors.white,
-                fontSize: 22,
-                fontWeight: FontWeight.bold)),
-        const SizedBox(height: 2),
-        Text(label,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-                color: Colors.white70, fontSize: 9, height: 1.3)),
-      ]),
-    );
+    return StatsStrip(stats: [
+      StripStat('$totalAssigned', 'Reçus', color: AppTheme.primary),
+      StripStat('$resolved', 'Résolus', color: AppTheme.success),
+      StripStat('$resolvedToday', "Aujourd'hui", color: AppTheme.navy),
+    ]);
   }
 }
 
@@ -2330,21 +1970,21 @@ class _StatsGrid extends StatelessWidget {
       Row(children: [
         Expanded(
             child: _StatCard('Total reçus', '$total',
-                Icons.assignment_outlined, const Color(0xFF1565C0))),
+                Icons.assignment_outlined, AppTheme.primary)),
         const SizedBox(width: 12),
         Expanded(
             child: _StatCard('En attente', '$pending',
-                Icons.pending_outlined, Colors.orange)),
+                Icons.pending_outlined, AppTheme.warning)),
       ]),
       const SizedBox(height: 12),
       Row(children: [
         Expanded(
             child: _StatCard('En cours', '$inProgress',
-                Icons.hourglass_bottom_outlined, Colors.purple)),
+                Icons.hourglass_bottom_outlined, AppTheme.purple)),
         const SizedBox(width: 12),
         Expanded(
             child: _StatCard('Résolus', '$resolved',
-                Icons.check_circle_outline, Colors.green)),
+                Icons.check_circle_outline, AppTheme.success)),
       ]),
     ]);
   }
@@ -2358,37 +1998,7 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 3))
-        ],
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(
-          padding: const EdgeInsets.all(7),
-          decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(10)),
-          child: Icon(icon, color: color, size: 18),
-        ),
-        const SizedBox(height: 8),
-        Text(value,
-            style: TextStyle(
-                fontSize: 24, fontWeight: FontWeight.bold, color: color)),
-        Text(label,
-            style: const TextStyle(
-                fontSize: 11,
-                color: AppTheme.grey,
-                fontWeight: FontWeight.w500)),
-      ]),
-    );
+    return StatTile(value: value, label: label, icon: icon, color: color);
   }
 }
 
@@ -2398,57 +2008,28 @@ class _RoutingMiniCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final status   = (routing['status'] as String?) ?? 'pending';
-    final rep      = routing['report'] as Map?;
-    final title    = rep?['title']        as String? ?? 'Signalement';
-    final severity = rep?['severity']     as String? ?? 'low';
-    final commune  = rep?['commune_name'] as String? ?? '';
-    final _cat = rep?['category'];
-    final category = _cat is Map ? (_cat['name'] as String? ?? '') : (_cat as String? ?? '');    final statusClr = AuthorityDashboardController.statusColor(status);
-    final sevClr    = AuthorityDashboardController.severityColor(severity);
+    final status = (routing['status'] as String?) ?? 'pending';
+    final rep = routing['report'] as Map?;
+    final title = rep?['title'] as String? ?? 'Signalement';
+    final severity = rep?['severity'] as String? ?? 'low';
+    final commune = rep?['commune_name'] as String? ?? '';
+    final cat = rep?['category'];
+    final category = cat is Map
+        ? (cat['name'] as String? ?? '')
+        : (cat as String? ?? '');
+    final sub = '$commune${category.isNotEmpty ? ' · $category' : ''}';
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 2))
-        ],
-      ),
-      child: Row(children: [
-        Container(
-          width: 4, height: 48,
-          decoration: BoxDecoration(
-              color: sevClr, borderRadius: BorderRadius.circular(2)),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 13),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 3),
-                Text(
-                    '$commune${category.isNotEmpty ? ' · $category' : ''}',
-                    style:
-                    TextStyle(fontSize: 11, color: Colors.grey[500]),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-              ]),
-        ),
-        _Chip(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: NeuListCard(
+        icon: Icons.assignment_outlined,
+        color: AuthorityDashboardController.severityColor(severity),
+        title: title,
+        lines: [if (sub.trim().isNotEmpty) sub],
+        trailing: _Chip(
             label: AuthorityDashboardController.statusLabel(status),
-            color: statusClr),
-      ]),
+            color: AuthorityDashboardController.statusColor(status)),
+      ),
     );
   }
 }
@@ -2462,19 +2043,19 @@ class _NoAgentBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: Colors.orange.withOpacity(0.08),
+        color: AppTheme.warning.withOpacity(0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.orange.withOpacity(0.3)),
+        border: Border.all(color: AppTheme.warning.withOpacity(0.3)),
       ),
       child: Row(children: [
         const Icon(Icons.warning_amber_outlined,
-            color: Colors.orange, size: 16),
+            color: AppTheme.warning, size: 16),
         const SizedBox(width: 8),
         const Expanded(
           child: Text('Aucun agent disponible',
               style: TextStyle(
                   fontSize: 11,
-                  color: Colors.orange,
+                  color: AppTheme.warning,
                   fontWeight: FontWeight.w600)),
         ),
         GestureDetector(
@@ -2482,7 +2063,7 @@ class _NoAgentBanner extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-                color: Colors.orange,
+                color: AppTheme.warning,
                 borderRadius: BorderRadius.circular(6)),
             child: const Text('+ Agent',
                 style: TextStyle(
@@ -2507,16 +2088,16 @@ class _EmptyAgentsPage extends StatelessWidget {
       child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.groups_outlined, size: 80, color: Colors.grey[200]),
+            Icon(Icons.groups_outlined, size: 80, color: AppTheme.mist),
             const SizedBox(height: 16),
             Text('Aucun agent assigné',
                 style: TextStyle(
-                    color: Colors.grey[500],
+                    color: AppTheme.slate,
                     fontWeight: FontWeight.w600,
                     fontSize: 16)),
             const SizedBox(height: 8),
             Text('Ajoutez des agents pour gérer vos signalements',
-                style: TextStyle(color: Colors.grey[400], fontSize: 13),
+                style: TextStyle(color: AppTheme.slate.withOpacity(0.7), fontSize: 13),
                 textAlign: TextAlign.center),
             const SizedBox(height: 24),
             ElevatedButton.icon(
@@ -2524,7 +2105,7 @@ class _EmptyAgentsPage extends StatelessWidget {
               icon: const Icon(Icons.person_add),
               label: const Text('Ajouter un agent'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1565C0),
+                backgroundColor: AppTheme.primary,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(
                     horizontal: 24, vertical: 12),
@@ -2533,34 +2114,6 @@ class _EmptyAgentsPage extends StatelessWidget {
               ),
             ),
           ]),
-    );
-  }
-}
-
-class _AgentStatBadge extends StatelessWidget {
-  final String label, value;
-  final Color color;
-  const _AgentStatBadge(this.label, this.value, this.color);
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(10)),
-        child: Column(children: [
-          Text(value,
-              style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: color)),
-          Text(label,
-              style: const TextStyle(
-                  fontSize: 9, color: Colors.white70)),
-        ]),
-      ),
     );
   }
 }
@@ -2581,22 +2134,35 @@ class _ActionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 9),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withOpacity(0.3)),
+          gradient: LinearGradient(
+            colors: [color.withOpacity(0.85), color],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+          borderRadius: BorderRadius.circular(15),
+          border: Border.all(color: Colors.white.withOpacity(0.25)),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.32),
+              blurRadius: 12,
+              offset: const Offset(0, 5),
+            ),
+          ],
         ),
         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 5),
+          Icon(icon, size: 16, color: Colors.white),
+          const SizedBox(width: 6),
           Text(label,
-              style: TextStyle(
-                  fontSize: 11,
-                  color: color,
-                  fontWeight: FontWeight.w600)),
+              style: const TextStyle(
+                  fontFamily: AppTheme.fontFamily,
+                  fontSize: 12.5,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700)),
         ]),
       ),
     );
@@ -2628,16 +2194,7 @@ class _FormField extends StatelessWidget {
       validator: validator,
       decoration: InputDecoration(
         labelText: label,
-        prefixIcon: Icon(icon, size: 18, color: const Color(0xFF1565C0)),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide:
-          const BorderSide(color: Color(0xFF1565C0), width: 2),
-        ),
-        contentPadding:
-        const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        labelStyle: TextStyle(fontSize: 13, color: Colors.grey[600]),
+        prefixIcon: Icon(icon, size: 18, color: AppTheme.primary),
       ),
     );
   }
@@ -2650,42 +2207,7 @@ class _SettingsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Padding(
-        padding: const EdgeInsets.only(left: 4, bottom: 8),
-        child: Text(title,
-            style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: Colors.grey[500],
-                letterSpacing: 0.5)),
-      ),
-      Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black.withOpacity(0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 2))
-          ],
-        ),
-        child: Column(
-          children: items.asMap().entries.map((e) {
-            final isLast = e.key == items.length - 1;
-            return Column(children: [
-              e.value,
-              if (!isLast)
-                Divider(
-                    height: 1,
-                    color: Colors.grey.withOpacity(0.08),
-                    indent: 52),
-            ]);
-          }).toList(),
-        ),
-      ),
-    ]);
+    return NeuGroup(title: title, children: items);
   }
 }
 
@@ -2705,23 +2227,12 @@ class _SettingsItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
+    return NeuRow(
+      icon: icon,
+      label: label,
+      trailing: trailing,
+      isAction: isAction,
       onTap: onTap,
-      leading: Container(
-        padding: const EdgeInsets.all(7),
-        decoration: BoxDecoration(
-            color: const Color(0xFF1565C0).withOpacity(0.08),
-            borderRadius: BorderRadius.circular(8)),
-        child: Icon(icon, color: const Color(0xFF1565C0), size: 18),
-      ),
-      title: Text(label,
-          style:
-          const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-      trailing: trailing ??
-          (isAction
-              ? const Icon(Icons.chevron_right,
-              color: AppTheme.grey, size: 18)
-              : null),
     );
   }
 }
@@ -2733,27 +2244,17 @@ class _MiniStat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return NeuCard(
       padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 2))
-        ],
-      ),
+      radius: 18,
+      depth: 0.7,
       child: Column(children: [
         Text(value,
             style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: color)),
+                fontSize: 22, fontWeight: FontWeight.bold, color: color)),
         const SizedBox(height: 2),
         Text(label,
-            style: const TextStyle(fontSize: 10, color: AppTheme.grey)),
+            style: const TextStyle(fontSize: 10, color: AppTheme.slate)),
       ]),
     );
   }
@@ -2767,15 +2268,16 @@ class _Chip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
           color: color.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(6)),
+          borderRadius: BorderRadius.circular(20)),
       child: Text(label,
           style: TextStyle(
-              fontSize: 9,
+              fontFamily: AppTheme.fontFamily,
+              fontSize: 10,
               color: color,
-              fontWeight: FontWeight.bold)),
+              fontWeight: FontWeight.w700)),
     );
   }
 }
@@ -2787,19 +2289,7 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(icon, size: 72, color: Colors.grey[200]),
-          const SizedBox(height: 14),
-          Text(message,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: Colors.grey[400], fontSize: 14, height: 1.5)),
-        ]),
-      ),
-    );
+    return EmptyState(icon: icon, title: message);
   }
 }
 
@@ -2809,31 +2299,17 @@ class _ErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(Icons.cloud_off_outlined, size: 72, color: Colors.grey[200]),
-          const SizedBox(height: 16),
-          const Text('Impossible de charger le dashboard',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          Text('Vérifiez votre connexion et réessayez.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey[500], fontSize: 13)),
-          const SizedBox(height: 20),
-          ElevatedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh),
-            label: const Text('Réessayer'),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1565C0),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12))),
-          ),
-        ]),
+    return EmptyState(
+      icon: Icons.cloud_off_outlined,
+      title: 'Impossible de charger le dashboard',
+      message: 'Vérifiez votre connexion et réessayez.',
+      action: SizedBox(
+        width: 200,
+        child: PrimaryActionButton(
+          label: 'Réessayer',
+          icon: Icons.refresh_rounded,
+          onTap: onRetry,
+        ),
       ),
     );
   }

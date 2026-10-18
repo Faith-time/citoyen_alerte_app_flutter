@@ -39,10 +39,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   void _navigateByRole(String role) {
     switch (role) {
-      case 'admin':     Get.offAllNamed(Routes.ADMIN_DASHBOARD); break;
-      case 'agent':     Get.offAllNamed(Routes.AGENT_DASHBOARD); break;
-      case 'authority': Get.offAllNamed(Routes.AUTHORITY_DASHBOARD); break;
-      default:          Get.offAllNamed(Routes.CITIZEN_DASHBOARD); break;
+      case 'admin':
+        Get.offAllNamed(Routes.ADMIN_DASHBOARD);
+        break;
+      case 'agent':
+        Get.offAllNamed(Routes.AGENT_DASHBOARD);
+        break;
+      case 'authority':
+        Get.offAllNamed(Routes.AUTHORITY_DASHBOARD);
+        break;
+      default:
+        Get.offAllNamed(Routes.CITIZEN_DASHBOARD);
+        break;
     }
   }
 
@@ -95,13 +103,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
         isError: false, bottom: true);
   }
 
-  void _showSnack(String msg,
-      {required bool isError, required bool bottom}) {
+  void _showSnack(String msg, {required bool isError, required bool bottom}) {
     Get.snackbar(
       isError ? 'Erreur' : 'Succès',
       msg,
-      snackPosition:
-      bottom ? SnackPosition.BOTTOM : SnackPosition.TOP,
+      snackPosition: bottom ? SnackPosition.BOTTOM : SnackPosition.TOP,
       backgroundColor: isError ? AppTheme.error : AppTheme.success,
       colorText: AppTheme.white,
       margin: const EdgeInsets.all(16),
@@ -113,339 +119,297 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.white,
-      body: Stack(
-        children: [
-          SafeArea(
-            child: Column(
-              children: [
-                // ── AppBar custom ──────────────────────────────────────────
-                _buildTopBar(),
-
-                // ── Formulaire scrollable ──────────────────────────────────
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
-                    child: Form(
-                      key: _formKey,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // Logo
-                          _buildLogo(),
-                          const SizedBox(height: 20),
-
-                          // Titre
-                          const Text(
-                            'Créez votre compte',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontFamily: 'Poppins',
-                              fontSize: 26,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.darkBlue,
+      backgroundColor: AppTheme.canvas,
+      body: Container(
+        decoration: const BoxDecoration(gradient: AppTheme.canvasGradient),
+        child: Stack(
+          children: [
+            SafeArea(
+              child: Column(
+                children: [
+                  _buildTopBar(),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildLogo(),
+                            const SizedBox(height: 18),
+                            const Text(
+                              'Créez votre compte',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontFamily: AppTheme.fontFamily,
+                                fontSize: 26,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.navy,
+                                letterSpacing: -0.4,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 6),
-                          const Text(
-                            'Rejoignez la communauté et signalez les incidents',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontFamily: 'Poppins',
-                              fontSize: 13,
-                              color: AppTheme.greyMedium,
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Rejoignez la communauté et signalez les incidents',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontFamily: AppTheme.fontFamily,
+                                fontSize: 13,
+                                color: AppTheme.slate,
+                              ),
                             ),
-                          ),
+                            const SizedBox(height: 12),
 
-                          const SizedBox(height: 28),
+                            const SizedBox(height: 24),
+                            _buildAvatar(),
+                            const SizedBox(height: 26),
 
-                          // ── Avatar ──────────────────────────────────────
-                          _buildAvatar(),
-                          const SizedBox(height: 28),
-
-                          // ── Champs ──────────────────────────────────────
-                          _buildField(
-                            controller: _nameController,
-                            label: 'Nom complet',
-                            hint: 'Prénom Nom',
-                            icon: Icons.person_outline_rounded,
-                            capitalization: TextCapitalization.words,
-                            validator: (v) {
-                              if (v == null || v.trim().isEmpty) {
-                                return 'Veuillez entrer votre nom';
-                              }
-                              if (v.trim().length < 3) {
-                                return 'Minimum 3 caractères';
-                              }
-                              return null;
-                            },
-                          ),
-
-                          const SizedBox(height: 14),
-
-                          _buildField(
-                            controller: _emailController,
-                            label: 'Email',
-                            hint: 'exemple@email.com',
-                            icon: Icons.email_outlined,
-                            keyboardType: TextInputType.emailAddress,
-                            validator: (v) {
-                              if (v == null || v.trim().isEmpty) {
-                                return 'Veuillez entrer votre email';
-                              }
-                              if (!GetUtils.isEmail(v.trim())) {
-                                return 'Email invalide';
-                              }
-                              return null;
-                            },
-                          ),
-
-                          const SizedBox(height: 14),
-
-                          _buildField(
-                            controller: _phoneController,
-                            label: 'Téléphone',
-                            hint: '77 123 45 67',
-                            icon: Icons.phone_outlined,
-                            keyboardType: TextInputType.phone,
-                            isRequired: false,
-                            validator: (v) {
-                              if (v != null && v.trim().isNotEmpty) {
-                                final clean = v.trim().replaceAll(' ', '');
-                                if (!RegExp(r'^7[0-9]{8}$').hasMatch(clean)) {
-                                  return 'Numéro invalide (ex: 77 123 45 67)';
+                            _buildField(
+                              controller: _nameController,
+                              label: 'Nom complet',
+                              hint: 'Prénom Nom',
+                              icon: Icons.person_outline_rounded,
+                              capitalization: TextCapitalization.words,
+                              validator: (v) {
+                                if (v == null || v.trim().isEmpty) {
+                                  return 'Veuillez entrer votre nom';
                                 }
-                              }
-                              return null;
-                            },
-                          ),
-
-                          const SizedBox(height: 14),
-
-                          _buildPasswordField(
-                            controller: _passwordController,
-                            label: 'Mot de passe',
-                            hint: 'Au moins 8 caractères',
-                            obscure: _obscurePassword,
-                            onToggle: () => setState(
-                                    () => _obscurePassword = !_obscurePassword),
-                            validator: (v) {
-                              if (v == null || v.isEmpty) {
-                                return 'Veuillez entrer un mot de passe';
-                              }
-                              if (v.length < 8) {
-                                return 'Minimum 8 caractères';
-                              }
-                              if (!v.contains(RegExp(r'[A-Z]'))) {
-                                return 'Au moins une majuscule requise';
-                              }
-                              if (!v.contains(RegExp(r'[0-9]'))) {
-                                return 'Au moins un chiffre requis';
-                              }
-                              return null;
-                            },
-                          ),
-
-                          const SizedBox(height: 14),
-
-                          _buildPasswordField(
-                            controller: _confirmPasswordController,
-                            label: 'Confirmer le mot de passe',
-                            hint: 'Retapez votre mot de passe',
-                            obscure: _obscureConfirm,
-                            onToggle: () => setState(
-                                    () => _obscureConfirm = !_obscureConfirm),
-                            validator: (v) {
-                              if (v == null || v.isEmpty) {
-                                return 'Veuillez confirmer votre mot de passe';
-                              }
-                              if (v != _passwordController.text) {
-                                return 'Les mots de passe ne correspondent pas';
-                              }
-                              return null;
-                            },
-                          ),
-
-                          const SizedBox(height: 20),
-
-                          // ── Conditions ──────────────────────────────────
-                          _buildTermsRow(),
-
-                          const SizedBox(height: 28),
-
-                          // ── Bouton S'inscrire ────────────────────────────
-                          SizedBox(
-                            height: 56,
-                            child: ElevatedButton(
-                              onPressed: _isLoading ? null : _handleRegister,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppTheme.primaryGreen,
-                                foregroundColor: AppTheme.white,
-                                disabledBackgroundColor: AppTheme.greyLight,
-                                elevation: 0,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                              ),
-                              child: _isLoading
-                                  ? const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  color: AppTheme.white,
-                                  strokeWidth: 2,
-                                ),
-                              )
-                                  : const Text(
-                                "S'INSCRIRE",
-                                style: TextStyle(
-                                  fontFamily: 'Poppins',
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 1,
-                                ),
-                              ),
+                                if (v.trim().length < 3) {
+                                  return 'Minimum 3 caractères';
+                                }
+                                return null;
+                              },
                             ),
-                          ),
+                            const SizedBox(height: 14),
 
-                          const SizedBox(height: 20),
+                            _buildField(
+                              controller: _emailController,
+                              label: 'Email',
+                              hint: 'exemple@email.com',
+                              icon: Icons.email_outlined,
+                              keyboardType: TextInputType.emailAddress,
+                              validator: (v) {
+                                if (v == null || v.trim().isEmpty) {
+                                  return 'Veuillez entrer votre email';
+                                }
+                                if (!GetUtils.isEmail(v.trim())) {
+                                  return 'Email invalide';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 14),
 
-                          // ── Séparateur OU ────────────────────────────────
-                          Row(
-                            children: [
-                              const Expanded(
-                                  child: Divider(
-                                      color: AppTheme.greyLight, thickness: 1)),
-                              Padding(
-                                padding:
-                                const EdgeInsets.symmetric(horizontal: 16),
-                                child: Text(
-                                  'OU',
-                                  style: TextStyle(
-                                    fontFamily: 'Poppins',
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                    color:
-                                    AppTheme.greyMedium.withOpacity(0.7),
+                            _buildField(
+                              controller: _phoneController,
+                              label: 'Téléphone',
+                              hint: '77 123 45 67',
+                              icon: Icons.phone_outlined,
+                              keyboardType: TextInputType.phone,
+                              isRequired: false,
+                              validator: (v) {
+                                if (v != null && v.trim().isNotEmpty) {
+                                  final clean = v.trim().replaceAll(' ', '');
+                                  if (!RegExp(r'^7[0-9]{8}$').hasMatch(clean)) {
+                                    return 'Numéro invalide (ex: 77 123 45 67)';
+                                  }
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 14),
+
+                            _buildPasswordField(
+                              controller: _passwordController,
+                              label: 'Mot de passe',
+                              hint: 'Au moins 8 caractères',
+                              obscure: _obscurePassword,
+                              onToggle: () => setState(
+                                  () => _obscurePassword = !_obscurePassword),
+                              validator: (v) {
+                                if (v == null || v.isEmpty) {
+                                  return 'Veuillez entrer un mot de passe';
+                                }
+                                if (v.length < 8) {
+                                  return 'Minimum 8 caractères';
+                                }
+                                if (!v.contains(RegExp(r'[A-Z]'))) {
+                                  return 'Au moins une majuscule requise';
+                                }
+                                if (!v.contains(RegExp(r'[0-9]'))) {
+                                  return 'Au moins un chiffre requis';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 14),
+
+                            _buildPasswordField(
+                              controller: _confirmPasswordController,
+                              label: 'Confirmer le mot de passe',
+                              hint: 'Retapez votre mot de passe',
+                              obscure: _obscureConfirm,
+                              onToggle: () => setState(
+                                  () => _obscureConfirm = !_obscureConfirm),
+                              validator: (v) {
+                                if (v == null || v.isEmpty) {
+                                  return 'Veuillez confirmer votre mot de passe';
+                                }
+                                if (v != _passwordController.text) {
+                                  return 'Les mots de passe ne correspondent pas';
+                                }
+                                return null;
+                              },
+                            ),
+
+                            const SizedBox(height: 20),
+                            _buildTermsRow(),
+                            const SizedBox(height: 26),
+
+                            // ── Bouton S'inscrire ─────────────────────────
+                            _isLoading
+                                ? Container(
+                                    height: 54,
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.mist,
+                                      borderRadius: BorderRadius.circular(
+                                          AppTheme.radiusMd),
+                                    ),
+                                    child: const Center(
+                                      child: SizedBox(
+                                        width: 22,
+                                        height: 22,
+                                        child: CircularProgressIndicator(
+                                          color: AppTheme.primary,
+                                          strokeWidth: 2.2,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                : PrimaryActionButton(
+                                    label: "S'inscrire",
+                                    icon: Icons.person_add_rounded,
+                                    onTap: _handleRegister,
+                                  ),
+
+                            const SizedBox(height: 20),
+
+                            Row(
+                              children: [
+                                const Expanded(
+                                    child: Divider(color: AppTheme.mist)),
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 16),
+                                  child: Text(
+                                    'OU',
+                                    style: TextStyle(
+                                      fontFamily: AppTheme.fontFamily,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: 1.2,
+                                      color: AppTheme.slate.withOpacity(0.8),
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const Expanded(
-                                  child: Divider(
-                                      color: AppTheme.greyLight, thickness: 1)),
-                            ],
-                          ),
+                                const Expanded(
+                                    child: Divider(color: AppTheme.mist)),
+                              ],
+                            ),
 
-                          const SizedBox(height: 20),
+                            const SizedBox(height: 20),
 
-                          // ── Google ───────────────────────────────────────
-                          SizedBox(
-                            height: 56,
-                            child: OutlinedButton.icon(
-                              onPressed:
-                              _isLoading ? null : _handleGoogleSignIn,
-                              icon: const FaIcon(FontAwesomeIcons.google,
-                                  size: 18, color: Color(0xFFDB4437)),
-                              label: const Text(
-                                "S'inscrire avec Google",
-                                style: TextStyle(
-                                  fontFamily: 'Poppins',
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppTheme.darkBlue,
-                                ),
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                backgroundColor: AppTheme.white,
-                                side: const BorderSide(
-                                    color: AppTheme.greyLight, width: 1),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
+                            // ── Google ────────────────────────────────────
+                            NeuCard(
+                              padding: const EdgeInsets.symmetric(vertical: 15),
+                              radius: AppTheme.radiusMd,
+                              depth: 0.6,
+                              onTap: _isLoading ? null : _handleGoogleSignIn,
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  FaIcon(FontAwesomeIcons.google,
+                                      size: 18, color: Color(0xFFDB4437)),
+                                  SizedBox(width: 12),
+                                  Text(
+                                    "S'inscrire avec Google",
+                                    style: TextStyle(
+                                      fontFamily: AppTheme.fontFamily,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.navy,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ),
 
-                          const SizedBox(height: 24),
+                            const SizedBox(height: 24),
 
-                          // ── Lien connexion ───────────────────────────────
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Text(
-                                'Déjà un compte ? ',
-                                style: TextStyle(
-                                  fontFamily: 'Poppins',
-                                  fontSize: 13,
-                                  color: AppTheme.greyMedium,
-                                ),
-                              ),
-                              GestureDetector(
-                                onTap: () => Get.back(),
-                                child: const Text(
-                                  'Se connecter',
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Text(
+                                  'Déjà un compte ? ',
                                   style: TextStyle(
-                                    fontFamily: 'Poppins',
+                                    fontFamily: AppTheme.fontFamily,
                                     fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppTheme.primaryGreen,
+                                    color: AppTheme.slate,
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        ],
+                                GestureDetector(
+                                  onTap: () => Get.back(),
+                                  child: const Text(
+                                    'Se connecter',
+                                    style: TextStyle(
+                                      fontFamily: AppTheme.fontFamily,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.primary,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
-          ),
-
-          // ── Loading overlay ────────────────────────────────────────────────
-          if (_isLoading)
-            Container(
-              color: AppTheme.darkBlue.withOpacity(0.25),
-              child: const Center(
-                child: CircularProgressIndicator(
-                  valueColor:
-                  AlwaysStoppedAnimation<Color>(AppTheme.primaryGreen),
-                ),
+                ],
               ),
             ),
-        ],
+
+            // ── Loading overlay ──────────────────────────────────────────
+            if (_isLoading)
+              Positioned.fill(
+                child: AbsorbPointer(
+                  child: Container(color: AppTheme.navy.withOpacity(0.12)),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  // ─── AppBar custom ────────────────────────────────────────────────────────
+  // ─── Barre du haut ────────────────────────────────────────────────────────
   Widget _buildTopBar() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
       child: Row(
         children: [
-          // Bouton retour
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: AppTheme.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.greyLight),
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.darkBlue.withOpacity(0.05),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                  size: 18, color: AppTheme.darkBlue),
-              onPressed: () => Get.back(),
-              padding: EdgeInsets.zero,
+          NeuCard(
+            padding: EdgeInsets.zero,
+            radius: 14,
+            depth: 0.5,
+            onTap: () => Get.back(),
+            child: const SizedBox(
+              width: 44,
+              height: 44,
+              child: Icon(Icons.arrow_back_ios_new_rounded,
+                  size: 18, color: AppTheme.navy),
             ),
           ),
           const Expanded(
@@ -453,14 +417,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
               'Créer un compte',
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontFamily: 'Poppins',
+                fontFamily: AppTheme.fontFamily,
                 fontSize: 17,
                 fontWeight: FontWeight.w600,
-                color: AppTheme.darkBlue,
+                color: AppTheme.navy,
               ),
             ),
           ),
-          const SizedBox(width: 44), // équilibre le back button
+          const SizedBox(width: 44),
         ],
       ),
     );
@@ -470,26 +434,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Widget _buildLogo() {
     return Center(
       child: Container(
-        width: 72,
-        height: 72,
+        width: 76,
+        height: 76,
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: AppTheme.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: AppTheme.primaryGreen.withOpacity(0.15),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
+          color: AppTheme.surface,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: AppTheme.neuShadow(depth: 0.8),
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: Image.asset(
-            'assets/images/alert_logo.png',
-            fit: BoxFit.contain,
-          ),
-        ),
+        child: const ShieldLogo(),
       ),
     );
   }
@@ -506,16 +460,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 height: 88,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: AppTheme.greyLight,
-                  border: Border.all(
-                    color: AppTheme.primaryGreen,
-                    width: 2.5,
-                  ),
+                  color: AppTheme.surface,
+                  border: Border.all(color: AppTheme.primary, width: 2.5),
+                  boxShadow: AppTheme.neuShadow(depth: 0.6),
                 ),
                 child: const Icon(
                   Icons.person_rounded,
                   size: 44,
-                  color: AppTheme.greyMedium,
+                  color: AppTheme.slate,
                 ),
               ),
               Positioned(
@@ -526,22 +478,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     'Avatar',
                     'Fonctionnalité à implémenter',
                     snackPosition: SnackPosition.BOTTOM,
-                    //backgroundColor: AppTheme.info,
                     colorText: AppTheme.white,
                     margin: const EdgeInsets.all(16),
                   ),
                   child: Container(
-                    width: 28,
-                    height: 28,
+                    width: 30,
+                    height: 30,
                     decoration: BoxDecoration(
-                      color: AppTheme.primaryGreen,
+                      color: AppTheme.accentAmber,
                       shape: BoxShape.circle,
                       border: Border.all(color: AppTheme.white, width: 2),
                     ),
                     child: const Icon(
                       Icons.camera_alt_rounded,
                       size: 14,
-                      color: AppTheme.white,
+                      color: AppTheme.navy,
                     ),
                   ),
                 ),
@@ -552,9 +503,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
           const Text(
             'Ajouter une photo (optionnel)',
             style: TextStyle(
-              fontFamily: 'Poppins',
+              fontFamily: AppTheme.fontFamily,
               fontSize: 12,
-              color: AppTheme.greyMedium,
+              color: AppTheme.slate,
             ),
           ),
         ],
@@ -578,9 +529,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
       keyboardType: keyboardType,
       textCapitalization: capitalization,
       style: const TextStyle(
-        fontFamily: 'Poppins',
+        fontFamily: AppTheme.fontFamily,
         fontSize: 14,
-        color: AppTheme.darkBlue,
+        color: AppTheme.navy,
       ),
       decoration: _deco(label: label, hint: hint, icon: icon),
       validator: validator,
@@ -600,9 +551,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
       controller: controller,
       obscureText: obscure,
       style: const TextStyle(
-        fontFamily: 'Poppins',
+        fontFamily: AppTheme.fontFamily,
         fontSize: 14,
-        color: AppTheme.darkBlue,
+        color: AppTheme.navy,
       ),
       decoration: _deco(
         label: label,
@@ -611,10 +562,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       ).copyWith(
         suffixIcon: IconButton(
           icon: Icon(
-            obscure
-                ? Icons.visibility_off_outlined
-                : Icons.visibility_outlined,
-            color: AppTheme.greyMedium,
+            obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+            color: AppTheme.slate,
             size: 20,
           ),
           onPressed: onToggle,
@@ -634,52 +583,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
       labelText: label,
       hintText: hint,
       prefixIcon: Container(
-        margin: const EdgeInsets.all(12),
+        margin: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: AppTheme.primaryGreen.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(8),
+          color: AppTheme.primary.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(10),
         ),
-        child: Icon(icon, color: AppTheme.primaryGreen, size: 20),
-      ),
-      filled: true,
-      fillColor: AppTheme.white,
-      contentPadding:
-      const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: AppTheme.greyLight),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: AppTheme.greyLight),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide:
-        const BorderSide(color: AppTheme.primaryGreen, width: 2),
-      ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: AppTheme.error),
-      ),
-      focusedErrorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: AppTheme.error, width: 2),
-      ),
-      labelStyle: const TextStyle(
-        fontFamily: 'Poppins',
-        fontSize: 13,
-        color: AppTheme.greyMedium,
-      ),
-      hintStyle: const TextStyle(
-        fontFamily: 'Poppins',
-        fontSize: 13,
-        color: AppTheme.greyMedium,
+        child: Icon(icon, color: AppTheme.primary, size: 20),
       ),
     );
   }
 
-  // ─── Ligne conditions d'utilisation ──────────────────────────────────────
+  // ─── Conditions d'utilisation ─────────────────────────────────────────────
   Widget _buildTermsRow() {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -690,8 +604,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
           child: Checkbox(
             value: _acceptTerms,
             onChanged: (v) => setState(() => _acceptTerms = v ?? false),
-            activeColor: AppTheme.primaryGreen,
-            side: const BorderSide(color: AppTheme.greyMedium, width: 1.5),
+            activeColor: AppTheme.primary,
+            side: const BorderSide(color: AppTheme.slate, width: 1.5),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(5),
             ),
@@ -704,9 +618,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
             child: RichText(
               text: const TextSpan(
                 style: TextStyle(
-                  fontFamily: 'Poppins',
+                  fontFamily: AppTheme.fontFamily,
                   fontSize: 13,
-                  color: AppTheme.greyMedium,
+                  color: AppTheme.slate,
                   height: 1.5,
                 ),
                 children: [
@@ -714,7 +628,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   TextSpan(
                     text: "Conditions d'utilisation",
                     style: TextStyle(
-                      color: AppTheme.primaryGreen,
+                      color: AppTheme.primary,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -722,7 +636,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   TextSpan(
                     text: 'Politique de confidentialité',
                     style: TextStyle(
-                      color: AppTheme.primaryGreen,
+                      color: AppTheme.primary,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -733,6 +647,5 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ),
       ],
     );
-
   }
 }
